@@ -2,95 +2,105 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* CalmTrip Design System - Pastel Green Aesthetic */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Nunito:wght@400;500;600;700&display=swap');
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-
+    /* Primary Palette - Calm Greens */
+    --mint: 160 52% 87%;
+    --sage: 151 18% 70%;
+    --olive: 150 24% 72%;
+    --forest: 152 35% 45%;
+    --deep-forest: 152 40% 35%;
+    
+    /* Neutral Palette */
+    --off-white: 60 20% 98%;
+    --cream: 40 27% 94%;
+    --light-beige: 35 21% 94%;
+    --warm-gray: 40 10% 60%;
+    --charcoal: 210 15% 25%;
+    
+    /* Semantic Colors */
+    --background: 60 20% 98%;
+    --foreground: 210 15% 20%;
+    
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-
+    --card-foreground: 210 15% 20%;
+    
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
-
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 0 0% 98%;
-
-    --sidebar-foreground: 240 5.3% 26.1%;
-
-    --sidebar-primary: 240 5.9% 10%;
-
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --popover-foreground: 210 15% 20%;
+    
+    --primary: 152 35% 45%;
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 160 52% 87%;
+    --secondary-foreground: 152 40% 35%;
+    
+    --muted: 40 27% 94%;
+    --muted-foreground: 40 10% 50%;
+    
+    --accent: 151 18% 70%;
+    --accent-foreground: 152 40% 25%;
+    
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 150 20% 88%;
+    --input: 150 20% 88%;
+    --ring: 152 35% 45%;
+    
+    --radius: 1rem;
+    
+    /* Shadows */
+    --shadow-soft: 0 4px 20px -2px hsl(152 35% 45% / 0.08);
+    --shadow-card: 0 8px 32px -4px hsl(152 35% 45% / 0.12);
+    --shadow-float: 0 12px 40px -8px hsl(152 35% 45% / 0.18);
+    --shadow-glow: 0 0 40px hsl(160 52% 87% / 0.5);
+    
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(160 52% 87%), hsl(151 18% 70%));
+    --gradient-hero: linear-gradient(180deg, hsl(160 52% 87% / 0.3), transparent);
+    --gradient-card: linear-gradient(145deg, hsl(0 0% 100%), hsl(40 27% 96%));
+    --gradient-cta: linear-gradient(135deg, hsl(152 35% 45%), hsl(152 40% 35%));
+    
+    /* Sidebar */
+    --sidebar-background: 160 52% 87%;
+    --sidebar-foreground: 210 15% 20%;
+    --sidebar-primary: 152 35% 45%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 151 18% 70%;
+    --sidebar-accent-foreground: 152 40% 25%;
+    --sidebar-border: 150 20% 85%;
+    --sidebar-ring: 152 35% 45%;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --background: 210 15% 12%;
+    --foreground: 60 20% 95%;
+    
+    --card: 210 15% 15%;
+    --card-foreground: 60 20% 95%;
+    
+    --popover: 210 15% 15%;
+    --popover-foreground: 60 20% 95%;
+    
+    --primary: 160 52% 75%;
+    --primary-foreground: 210 15% 12%;
+    
+    --secondary: 152 35% 30%;
+    --secondary-foreground: 160 52% 87%;
+    
+    --muted: 210 15% 20%;
+    --muted-foreground: 40 10% 60%;
+    
+    --accent: 151 18% 35%;
+    --accent-foreground: 160 52% 87%;
+    
+    --border: 210 15% 25%;
+    --input: 210 15% 25%;
+    --ring: 160 52% 75%;
   }
 }
 
@@ -98,8 +108,159 @@ All colors MUST be HSL.
   * {
     @apply border-border;
   }
-
-  body {
-    @apply bg-background text-foreground;
+  
+  html {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
   }
+  
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'ss01', 'ss02';
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Nunito', sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+}
+
+@layer components {
+  /* Floating Card */
+  .card-float {
+    @apply bg-card rounded-2xl p-5;
+    box-shadow: var(--shadow-card);
+    backdrop-filter: blur(10px);
+  }
+  
+  /* Soft Button */
+  .btn-calm {
+    @apply px-6 py-3 rounded-xl font-medium transition-all duration-300;
+    background: var(--gradient-cta);
+    @apply text-primary-foreground;
+    box-shadow: var(--shadow-soft);
+  }
+  
+  .btn-calm:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-float);
+  }
+  
+  .btn-calm:active {
+    transform: translateY(0);
+  }
+  
+  /* Glass Effect */
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl;
+    border: 1px solid hsl(var(--border) / 0.5);
+  }
+  
+  /* Pastel Tag */
+  .tag-mint {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-sm font-medium;
+    background: hsl(var(--mint));
+    color: hsl(var(--deep-forest));
+  }
+  
+  /* Stat Card */
+  .stat-card {
+    @apply bg-card rounded-2xl p-4;
+    box-shadow: var(--shadow-soft);
+  }
+  
+  /* Map Container */
+  .map-container {
+    @apply rounded-2xl overflow-hidden;
+    box-shadow: var(--shadow-card);
+  }
+  
+  /* Photo Marker */
+  .photo-marker {
+    @apply w-12 h-12 rounded-full border-3 border-white cursor-pointer;
+    box-shadow: var(--shadow-float);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+  }
+  
+  .photo-marker:hover {
+    transform: scale(1.15);
+    box-shadow: var(--shadow-glow);
+  }
+  
+  /* Timeline Dot */
+  .timeline-dot {
+    @apply w-3 h-3 rounded-full bg-primary;
+    box-shadow: 0 0 0 4px hsl(var(--mint));
+  }
+  
+  /* Safe area for mobile */
+  .safe-bottom {
+    padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+  }
+  
+  .safe-top {
+    padding-top: max(env(safe-area-inset-top), 1rem);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  
+  .animate-pulse-soft {
+    animation: pulse-soft 3s ease-in-out infinite;
+  }
+  
+  .animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+  }
+  
+  .border-3 {
+    border-width: 3px;
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mapbox overrides */
+.mapboxgl-canvas {
+  @apply rounded-2xl;
+}
+
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-attrib {
+  display: none !important;
 }
