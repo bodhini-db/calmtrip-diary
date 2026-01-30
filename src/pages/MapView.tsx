@@ -1,163 +1,180 @@
-import { useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { ChevronLeft, Navigation2, Layers, Plus, Camera } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { useTripDetector } from "@/hooks/useTripDetector";
+import { getTrips, getPhotos, getPhotoUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import { ChevronLeft, Camera, Share2 } from "lucide-react";
+import L from "leaflet";
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
 
-// Note: Mapbox requires an access token. Users need to add their own token.
-const MAPBOX_PLACEHOLDER = "YOUR_MAPBOX_ACCESS_TOKEN";
+interface PhotoMarker {
+  id: string;
+  lat: number;
+  lng: number;
+  url?: string;
+}
 
-export default function MapView() {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const [showTokenWarning, setShowTokenWarning] = useState(true);
+function FitBounds({ positions }: { positions: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || positions.length === 0) return;
+    const bounds = L.latLngBounds(positions as any);
+    map.fitBounds(bounds, { padding: [50, 50] });
+  }, [map, positions]);
+  return null;
+}
+
+const MapView = () => {
+  const navigate = useNavigate();
+  const { user, loading } = useAuth();
+  const { tripData, startTracking, stopTracking, startTrip, endTrip } = useTripDetector();
+  const [photos, setPhotos] = useState<PhotoMarker[]>([]);
+  const [isTracking, setIsTracking] = useState(false);
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user && !loading) {
+      navigate("/");
+      return;
+    }
+  }, [user, loading, navigate]);
+
+  // Load photos and convert storage path to public URL
+  useEffect(() => {
+    const load = async () => {
+      if (!user) return;
+      try {
+        const trips = await getTrips(user.id);
+        const all: PhotoMarker[] = [];
+        for (const trip of trips) {
+          const tripPhotos = await getPhotos(trip.id);
+          for (const p of tripPhotos) {
+            if (p.latitude && p.longitude) {
+              let url = p.storage_path;
+              try {
+                url = (await getPhotoUrl(p.storage_path)) || url;
+              } catch (e) {
+                // ignore
+              }
+              all.push({ id: p.id, lat: p.latitude, lng: p.longitude, url });
+            }
+          }
+        }
+        setPhotos(all);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    load();
+  }, [user]);
+
+  const handleToggleTracking = () => {
+    if (isTracking) {
+      stopTracking();
+      const finalData = endTrip();
+      console.log("Trip ended:", finalData);
+      setIsTracking(false);
+    } else {
+      startTracking();
+      startTrip();
+      setIsTracking(true);
+    }
+  };
+
+  const handleAddPhoto = async () => {
+    if (!user) return;
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (err) {
+        console.error("Camera error:", err);
+      }
+    }
+  };
+
+  const polyPositions: [number, number][] = tripData.locations.map((l) => [l.latitude, l.longitude]);
+
+  const createPhotoIcon = (url?: string) => {
+    const html = url
+      ? `<div style="width:56px;height:56px;border-radius:12px;overflow:hidden;border:3px solid white;box-shadow:0 4px 8px rgba(0,0,0,0.15);background-image:url('${url}');background-size:cover;background-position:center"></div>`
+      : `<div style="width:56px;height:56px;border-radius:12px;background:#e2e8f0;border:3px solid white"></div>`;
+    return L.divIcon({ html, className: "photo-marker", iconSize: [56, 56], iconAnchor: [28, 28] });
+  };
+
+  if (loading) {
+    return (
+      <div className="w-full h-screen flex items-center justify-center bg-background">
+        <p className="text-muted-foreground">Loading map...</p>
+      </div>
+    );
+  }
+
+  const center: [number, number] = polyPositions.length > 0 ? polyPositions[Math.floor(polyPositions.length / 2)] : [37.7749, -122.4194];
 
   return (
-    <div className="min-h-screen bg-background relative">
-      {/* Map Container */}
-      <div 
-        ref={mapContainerRef} 
-        className="absolute inset-0 bg-gradient-to-br from-mint via-sage/30 to-cream"
-      >
-        {/* Placeholder Map Background */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="text-center space-y-4">
-            {showTokenWarning && (
-              <motion.div
-                className="bg-card rounded-2xl p-6 shadow-float mx-4 max-w-sm"
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-              >
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-mint flex items-center justify-center">
-                  <Navigation2 className="w-8 h-8 text-forest" />
-                </div>
-                <h3 className="font-display font-bold text-lg text-foreground mb-2">
-                  Map Ready
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Connect your Mapbox account to see live maps with your trip routes and photo markers.
-                </p>
-                <Button variant="calm" className="w-full" onClick={() => setShowTokenWarning(false)}>
-                  Continue with Preview
-                </Button>
-              </motion.div>
-            )}
-          </div>
-        </div>
+    <div className="relative w-full h-screen flex flex-col">
+      <MapContainer center={center} zoom={13} className="flex-1 h-full w-full">
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
+        {polyPositions.length > 0 && <Polyline positions={polyPositions} pathOptions={{ color: "#86efac", weight: 4, opacity: 0.9 }} />}
+        {polyPositions.length > 0 && <FitBounds positions={polyPositions} />}
 
-        {/* Simulated Route Line */}
-        {!showTokenWarning && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
-            <motion.path
-              d="M 50 400 Q 150 350 200 300 T 350 250"
-              fill="none"
-              stroke="hsl(152, 35%, 45%)"
-              strokeWidth="4"
-              strokeLinecap="round"
-              strokeDasharray="0 1"
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: 2, ease: "easeInOut" }}
-              style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.1))" }}
-            />
-          </svg>
-        )}
-
-        {/* Floating Photo Markers */}
-        {!showTokenWarning && (
-          <>
-            <motion.div
-              className="absolute top-1/3 left-1/4 w-12 h-12 rounded-full bg-forest border-3 border-white shadow-float cursor-pointer animate-float"
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              whileHover={{ scale: 1.2 }}
-            >
-              <div className="w-full h-full rounded-full bg-gradient-to-br from-forest to-sage flex items-center justify-center">
-                <Camera className="w-5 h-5 text-white" />
+        {photos.map((p) => (
+          <Marker key={p.id} position={[p.lat, p.lng]} icon={createPhotoIcon(p.url)} eventHandlers={{ click: () => setSelectedPhoto(p.id) }}>
+            <Popup>
+              <div style={{ width: 160, height: 112, overflow: "hidden" }}>
+                {p.url ? <img src={p.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} alt="photo" /> : <div style={{ width: "100%", height: "100%", background: "#eee" }} />}
               </div>
-            </motion.div>
-            <motion.div
-              className="absolute top-1/2 right-1/3 w-10 h-10 rounded-full bg-olive border-3 border-white shadow-float cursor-pointer"
-              initial={{ scale: 0, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              transition={{ delay: 0.7 }}
-              whileHover={{ scale: 1.2 }}
-              style={{ animationDelay: "1s" }}
-            >
-              <div className="w-full h-full rounded-full bg-gradient-to-br from-olive to-sage flex items-center justify-center">
-                <span className="text-xs">📸</span>
-              </div>
-            </motion.div>
-          </>
-        )}
-      </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
 
-      {/* Header Overlay */}
+      {/* Header */}
       <div className="absolute top-0 left-0 right-0 safe-top px-4 py-3 flex items-center justify-between z-10">
-        <Link to="/home">
-          <Button variant="float" size="icon">
-            <ChevronLeft className="w-5 h-5" />
-          </Button>
-        </Link>
-        <h1 className="font-display font-bold text-foreground bg-card/80 backdrop-blur px-4 py-2 rounded-full shadow-soft">
-          Today's Route
-        </h1>
-        <Button variant="float" size="icon">
-          <Layers className="w-5 h-5" />
+        <Button variant="icon" size="icon" onClick={() => navigate(-1)} className="bg-white/80 backdrop-blur">
+          <ChevronLeft className="w-5 h-5" />
         </Button>
+        <h1 className="font-bold text-foreground">Your Journey</h1>
+        <div className="w-10" />
       </div>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 left-0 right-0 p-4 pb-8 z-10">
-        {/* Trip Info Card */}
-        {!showTokenWarning && (
-          <motion.div
-            className="bg-card rounded-2xl p-4 shadow-float mb-4"
-            initial={{ y: 100, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            transition={{ delay: 0.3 }}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Current Trip</p>
-                <h3 className="font-display font-bold text-foreground">Marina District Walk</h3>
-              </div>
-              <div className="flex items-center gap-2 text-forest">
-                <span className="w-2 h-2 bg-forest rounded-full animate-pulse" />
-                <span className="text-sm font-medium">Tracking</span>
-              </div>
-            </div>
-            <div className="flex gap-4 text-sm">
-              <div>
-                <p className="text-muted-foreground">Distance</p>
-                <p className="font-semibold text-foreground">2.4 km</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Duration</p>
-                <p className="font-semibold text-foreground">45 min</p>
-              </div>
-              <div>
-                <p className="text-muted-foreground">Photos</p>
-                <p className="font-semibold text-foreground">3</p>
-              </div>
-            </div>
-          </motion.div>
-        )}
+      <div className="absolute bottom-0 left-0 right-0 px-4 py-6 space-y-3 z-10">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Distance</p>
+            <p className="font-bold text-foreground">{(tripData.distance / 1000).toFixed(2)}km</p>
+          </div>
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Duration</p>
+            <p className="font-bold text-foreground">{Math.round((Date.now() - tripData.startTime) / 60000)}m</p>
+          </div>
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Photos</p>
+            <p className="font-bold text-foreground">{photos.length}</p>
+          </div>
+        </div>
 
-        {/* Action Buttons */}
         <div className="flex gap-3">
-          <Button variant="float" size="icon-lg" className="shrink-0">
-            <Navigation2 className="w-5 h-5 text-forest" />
+          <Button variant="outline" size="lg" className="flex-1" onClick={handleAddPhoto}>
+            <Camera className="w-4 h-4" />
+            Photo
           </Button>
-          <Button variant="calm" className="flex-1" size="lg">
-            <Camera className="w-5 h-5" />
-            Add Photo
+          <Button variant="outline" size="lg" className="flex-1">
+            <Share2 className="w-4 h-4" />
+            Share
           </Button>
-          <Button variant="float" size="icon-lg" className="shrink-0">
-            <Plus className="w-5 h-5" />
+          <Button variant={isTracking ? "destructive" : "calm"} size="lg" className="flex-1" onClick={handleToggleTracking}>
+            {isTracking ? "End Trip" : "Start Trip"}
           </Button>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default MapView;
+

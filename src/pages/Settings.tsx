@@ -1,130 +1,228 @@
+import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, ChevronRight, User, MapPin, Bell, Shield, HelpCircle, LogOut, Moon, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
+import { FloatingCard } from "@/components/ui/floating-card";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
-import { useState } from "react";
+import { User, MapPin, Bell, Shield, HelpCircle, LogOut, Lock } from "lucide-react";
+import { signOut } from "@/lib/supabase";
+import { getPrivacySettings, updatePrivacySettings } from "@/lib/api";
 
-const settingsGroups = [
-  {
-    title: "Account",
-    items: [
-      { icon: User, label: "Edit Profile", path: "/profile" },
-      { icon: Bell, label: "Notifications", path: "/notifications" },
-      { icon: Shield, label: "Privacy & Security", path: "/privacy" },
-    ],
-  },
-  {
-    title: "Tracking",
-    items: [
-      { icon: MapPin, label: "Location Settings", path: "/location" },
-      { icon: Smartphone, label: "Battery Optimization", path: "/battery" },
-    ],
-  },
-  {
-    title: "Support",
-    items: [
-      { icon: HelpCircle, label: "Help Center", path: "/help" },
-    ],
-  },
-];
+const Settings = () => {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [privacySettings, setPrivacySettings] = useState<any>(null);
+  const [gpsEnabled, setGpsEnabled] = useState(true);
+  const [photosEnabled, setPhotosEnabled] = useState(true);
 
-export default function Settings() {
-  const [darkMode, setDarkMode] = useState(false);
-  const [trackingEnabled, setTrackingEnabled] = useState(true);
+  useEffect(() => {
+    if (!user && !loading) {
+      navigate("/");
+      return;
+    }
+
+    if (user) {
+      loadSettings();
+    }
+  }, [user, loading, navigate]);
+
+  const loadSettings = async () => {
+    if (!user) return;
+    try {
+      const settings = await getPrivacySettings(user.id);
+      setPrivacySettings(settings);
+      setGpsEnabled(settings?.gps_tracking_enabled ?? true);
+      setPhotosEnabled(settings?.photo_geotagging_enabled ?? true);
+    } catch (error) {
+      console.error("Error loading settings:", error);
+    }
+  };
+
+  const handleGpsToggle = async (checked: boolean) => {
+    setGpsEnabled(checked);
+    if (user && privacySettings) {
+      try {
+        await updatePrivacySettings(user.id, {
+          ...privacySettings,
+          gps_tracking_enabled: checked,
+        });
+      } catch (error) {
+        console.error("Error updating GPS setting:", error);
+      }
+    }
+  };
+
+  const handlePhotosToggle = async (checked: boolean) => {
+    setPhotosEnabled(checked);
+    if (user && privacySettings) {
+      try {
+        await updatePrivacySettings(user.id, {
+          ...privacySettings,
+          photo_geotagging_enabled: checked,
+        });
+      } catch (error) {
+        console.error("Error updating photo setting:", error);
+      }
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      navigate("/");
+    } catch (error) {
+      console.error("Sign out error:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading settings...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20">
       {/* Header */}
-      <header className="safe-top px-4 py-4 flex items-center justify-between border-b border-border/50">
-        <Link to="/home">
-          <Button variant="ghost" size="icon">
-            <ChevronLeft className="w-6 h-6" />
-          </Button>
-        </Link>
-        <h1 className="font-display font-bold text-lg">Settings</h1>
-        <div className="w-10" />
+      <header className="safe-top px-4 py-6">
+        <h1 className="font-display font-bold text-2xl text-foreground mb-1">Settings</h1>
+        <p className="text-muted-foreground">Manage your account & preferences</p>
       </header>
 
-      <main className="px-4 py-6 space-y-6">
+      <main className="px-4 space-y-6">
         {/* Profile Card */}
-        <motion.div
-          className="bg-gradient-to-br from-forest to-deep-forest rounded-2xl p-5 text-white"
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center text-2xl font-bold border-2 border-white/30">
-              A
+        {user && (
+          <FloatingCard>
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-gradient-to-br from-forest to-sage flex items-center justify-center text-white font-bold text-lg">
+                {user.email?.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1">
+                <h2 className="font-semibold text-foreground">{user.email}</h2>
+                <p className="text-sm text-muted-foreground">Account holder</p>
+              </div>
             </div>
-            <div className="flex-1">
-              <h2 className="font-display font-bold text-lg">Alex Johnson</h2>
-              <p className="text-sm opacity-80">alex@example.com</p>
-              <p className="text-xs opacity-60 mt-1">Member since Jan 2026</p>
+          </FloatingCard>
+        )}
+
+        {/* Tracking Settings */}
+        <section>
+          <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+            <MapPin className="w-4 h-4" />
+            Tracking & Location
+          </h2>
+          <FloatingCard className="space-y-4">
+            <div className="border-b border-border/50 pb-4">
+              <ToggleSwitch
+                checked={gpsEnabled}
+                onChange={handleGpsToggle}
+                label="GPS Tracking"
+                description="Track your journeys automatically"
+              />
             </div>
+            <div>
+              <ToggleSwitch
+                checked={photosEnabled}
+                onChange={handlePhotosToggle}
+                label="Geotagged Photos"
+                description="Add location data to photos"
+              />
+            </div>
+          </FloatingCard>
+        </section>
+
+        {/* Privacy & Consent */}
+        <section>
+          <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Shield className="w-4 h-4" />
+            Privacy & Data
+          </h2>
+          <FloatingCard className="space-y-4">
+            <div className="space-y-2">
+              <h3 className="font-medium text-foreground">Your Data Rights</h3>
+              <ul className="text-sm text-muted-foreground space-y-1">
+                <li>✓ All data is encrypted in transit and at rest</li>
+                <li>✓ No third-party tracking or ads</li>
+                <li>✓ You can export or delete your data anytime</li>
+                <li>✓ We never sell your information</li>
+              </ul>
+            </div>
+
+            <div className="border-t border-border/50 pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+              >
+                <Lock className="w-4 h-4" />
+                View Privacy Policy
+              </Button>
+            </div>
+          </FloatingCard>
+        </section>
+
+        {/* Support */}
+        <section>
+          <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+            <HelpCircle className="w-4 h-4" />
+            Support
+          </h2>
+          <FloatingCard className="space-y-2">
+            <button className="w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition">
+              <span className="text-sm font-medium text-foreground">Help Center</span>
+              <span className="text-muted-foreground">→</span>
+            </button>
+            <button className="w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition">
+              <span className="text-sm font-medium text-foreground">Report a Bug</span>
+              <span className="text-muted-foreground">→</span>
+            </button>
+            <button className="w-full flex items-center justify-between p-3 hover:bg-muted/50 rounded-lg transition">
+              <span className="text-sm font-medium text-foreground">Send Feedback</span>
+              <span className="text-muted-foreground">→</span>
+            </button>
+          </FloatingCard>
+        </section>
+
+        {/* Account Actions */}
+        <section>
+          <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+            <User className="w-4 h-4" />
+            Account
+          </h2>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+            >
+              <Lock className="w-4 h-4" />
+              Change Password
+            </Button>
+            <Button
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={handleSignOut}
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </Button>
           </div>
-        </motion.div>
-
-        {/* Quick Toggles */}
-        <div className="bg-card rounded-2xl shadow-soft p-4 space-y-4">
-          <ToggleSwitch
-            checked={trackingEnabled}
-            onChange={setTrackingEnabled}
-            label="GPS Tracking"
-            description="Automatically track your journeys"
-          />
-          <div className="border-t border-border/50" />
-          <ToggleSwitch
-            checked={darkMode}
-            onChange={setDarkMode}
-            label="Dark Mode"
-            description="Easier on the eyes at night"
-          />
-        </div>
-
-        {/* Settings Groups */}
-        {settingsGroups.map((group, groupIndex) => (
-          <motion.section
-            key={group.title}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: groupIndex * 0.1 }}
-          >
-            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1">
-              {group.title}
-            </h3>
-            <div className="bg-card rounded-2xl shadow-soft overflow-hidden">
-              {group.items.map((item, index) => (
-                <button
-                  key={item.label}
-                  className="w-full flex items-center gap-3 p-4 text-left hover:bg-mint/20 transition-colors"
-                  style={{
-                    borderBottom: index < group.items.length - 1 ? "1px solid hsl(var(--border) / 0.5)" : "none"
-                  }}
-                >
-                  <div className="w-9 h-9 rounded-full bg-mint/50 flex items-center justify-center">
-                    <item.icon className="w-4 h-4 text-forest" />
-                  </div>
-                  <span className="flex-1 font-medium text-foreground">{item.label}</span>
-                  <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                </button>
-              ))}
-            </div>
-          </motion.section>
-        ))}
-
-        {/* Logout Button */}
-        <Button variant="outline" className="w-full text-destructive border-destructive/30 hover:bg-destructive/10">
-          <LogOut className="w-4 h-4" />
-          Sign Out
-        </Button>
+        </section>
 
         {/* App Info */}
-        <div className="text-center space-y-1 py-4">
-          <p className="text-xs text-muted-foreground">CalmTrip v1.0.0</p>
-          <p className="text-xs text-muted-foreground">Made with 💚 for SDG 9</p>
-        </div>
+        <FloatingCard className="text-center py-6">
+          <p className="text-xs text-muted-foreground mb-2">
+            CalmTrip v1.0
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Built with care for mindful travelers 💚
+          </p>
+        </FloatingCard>
       </main>
     </div>
   );
-}
+};
+
+export default Settings;

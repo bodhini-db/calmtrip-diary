@@ -1,35 +1,121 @@
 import { motion } from "framer-motion";
-import { Bell, Navigation, MapPin, ChevronRight, Sun, Cloud, Footprints } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Bell, Navigation, MapPin, ChevronRight, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FloatingCard } from "@/components/ui/floating-card";
 import { StatCard } from "@/components/ui/stat-card";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { useTripDetector } from "@/hooks/useTripDetector";
+import { getTrips, getPhotos } from "@/lib/api";
+import { calculateInsights, formatDistance } from "@/lib/insights";
+import { signOut } from "@/lib/supabase";
 import mapPreview from "@/assets/map-preview.jpg";
-import diaryEntry1 from "@/assets/diary-entry-1.jpg";
-import diaryEntry2 from "@/assets/diary-entry-2.jpg";
 
 export default function Home() {
+  const navigate = useNavigate();
+  const { user, loading } = useAuth();
+  const { tripData, startTracking, stopTracking } = useTripDetector();
+  const [trips, setTrips] = useState<any[]>([]);
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [insights, setInsights] = useState<any>(null);
+  const [userName, setUserName] = useState("Traveler");
+
+  useEffect(() => {
+    if (!user && !loading) {
+      navigate("/");
+      return;
+    }
+
+    if (user) {
+      // Load user data
+      const email = user.email?.split("@")[0] || "Traveler";
+      setUserName(email.charAt(0).toUpperCase() + email.slice(1));
+
+      // Load trips and photos
+      loadUserData();
+
+      // Start location tracking
+      startTracking();
+    }
+
+    return () => stopTracking();
+  }, [user, loading, navigate]);
+
+  const loadUserData = async () => {
+    if (!user) return;
+    try {
+      const userTrips = await getTrips(user.id);
+      setTrips(userTrips);
+
+      // Load all photos from all trips
+      const allPhotos = await Promise.all(
+        userTrips.map((trip: any) => getPhotos(trip.id))
+      ).then(results => results.flat());
+      setPhotos(allPhotos);
+
+      // Calculate insights
+      const newInsights = calculateInsights(userTrips, allPhotos);
+      setInsights(newInsights);
+    } catch (error) {
+      console.error("Error loading user data:", error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      navigate("/");
+    } catch (error) {
+      console.error("Sign out error:", error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4 animate-pulse">🧳</div>
+          <p className="text-muted-foreground">Loading your journeys...</p>
+        </div>
+      </div>
+    );
+  }
+
+  const recentTrips = trips.slice(0, 2);
+  const todayDistance = tripData.distance / 1000; // Convert to km
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="safe-top px-4 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-gradient-to-br from-forest to-sage flex items-center justify-center text-white font-bold">
-            A
+            {userName.charAt(0).toUpperCase()}
           </div>
           <div>
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Welcome back</p>
-            <h1 className="font-display font-bold text-foreground">Good morning, Alex</h1>
+            <h1 className="font-display font-bold text-foreground">Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {userName}</h1>
           </div>
         </div>
-        <Button variant="icon" size="icon">
-          <Bell className="w-5 h-5" />
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="icon" size="icon">
+            <Bell className="w-5 h-5" />
+          </Button>
+          <Button
+            variant="icon"
+            size="icon"
+            onClick={handleSignOut}
+            title="Sign out"
+          >
+            <LogOut className="w-5 h-5" />
+          </Button>
+        </div>
       </header>
 
       {/* Main Content */}
       <main className="px-4 space-y-6 pb-8">
-        {/* Map Preview Card */}
+        {/* Today's Journey Card */}
         <FloatingCard className="p-0 overflow-hidden">
           <div className="relative h-48">
             <img
@@ -40,18 +126,20 @@ export default function Home() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
             
             {/* Active Tracking Badge */}
-            <motion.div
-              className="absolute top-3 left-3 flex items-center gap-2 bg-forest text-white px-3 py-1.5 rounded-full text-xs font-medium"
-              animate={{ scale: [1, 1.05, 1] }}
-              transition={{ repeat: Infinity, duration: 2 }}
-            >
-              <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
-              ACTIVE TRACK
-            </motion.div>
+            {tripData.isActive && (
+              <motion.div
+                className="absolute top-3 left-3 flex items-center gap-2 bg-forest text-white px-3 py-1.5 rounded-full text-xs font-medium"
+                animate={{ scale: [1, 1.05, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+              >
+                <span className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                ACTIVE TRACK
+              </motion.div>
+            )}
 
             {/* Location Label */}
             <div className="absolute bottom-3 left-3 text-white">
-              <p className="text-sm opacity-80">San Francisco</p>
+              <p className="text-sm opacity-80">{insights?.mostVisitedLocation || "Exploring"}</p>
             </div>
           </div>
 
@@ -59,9 +147,11 @@ export default function Home() {
           <div className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Ongoing Discovery</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Today's Discovery</p>
                 <h2 className="font-display font-bold text-lg text-foreground">Today's Journey</h2>
-                <p className="text-sm text-muted-foreground">Exploring the Marina District</p>
+                <p className="text-sm text-muted-foreground">
+                  {formatDistance(todayDistance)} traveled{tripData.isActive ? " (ongoing)" : ""}
+                </p>
               </div>
               <Link to="/map">
                 <Button variant="calm" size="sm">
@@ -73,104 +163,102 @@ export default function Home() {
           </div>
         </FloatingCard>
 
-        {/* Weekly Insights */}
-        <section>
-          <h3 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
-            <span className="w-1.5 h-1.5 rounded-full bg-forest" />
-            Weekly Insights
-          </h3>
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard
-              icon={<Footprints className="w-4 h-4" />}
-              label="Distance"
-              value="42.5 km"
-              trend="+15%"
-              trendUp
-            />
-            <StatCard
-              icon={<MapPin className="w-4 h-4" />}
-              label="Adventures"
-              value="12"
-              trend="+2 trips"
-              trendUp
-            />
-          </div>
-        </section>
-
-        {/* Recent Diary Entries */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-display font-semibold text-foreground flex items-center gap-2">
+        {/* Insights */}
+        {insights && (
+          <section>
+            <h3 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
               <span className="w-1.5 h-1.5 rounded-full bg-forest" />
-              Recent Diary Entries
+              Your Journey
             </h3>
-            <Link to="/journal" className="text-sm text-forest font-medium flex items-center gap-1">
-              See all
-              <ChevronRight className="w-4 h-4" />
-            </Link>
-          </div>
+            <div className="space-y-2 mb-4 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+              <p className="text-sm text-emerald-900">{insights.friendlyMessage}</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <StatCard
+                icon={<MapPin className="w-4 h-4" />}
+                label="Total Distance"
+                value={formatDistance(insights.totalDistanceKm)}
+                trend={`${insights.tripCount} trips`}
+                trendUp
+              />
+              <StatCard
+                icon={<Navigation className="w-4 h-4" />}
+                label="This Week"
+                value={formatDistance(insights.weeklyDistance)}
+                trend={`${Math.round(insights.weeklyDistance / 7)}km/day`}
+                trendUp
+              />
+            </div>
+          </section>
+        )}
 
-          <div className="space-y-3">
-            <DiaryEntryCard
-              image={diaryEntry1}
-              title="Golden Gate Park"
-              time="2:30 PM"
-              duration="2.5 hours"
-              weather="Sunny"
-            />
-            <DiaryEntryCard
-              image={diaryEntry2}
-              title="Lands End Lookout"
-              time="Yesterday"
-              duration="1.2 hours"
-              weather="Windy"
-            />
-          </div>
-        </section>
+        {/* Recent Trips */}
+        {recentTrips.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-display font-semibold text-foreground flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-forest" />
+                Recent Trips
+              </h3>
+              <Link to="/journal" className="text-sm text-forest font-medium flex items-center gap-1">
+                See all
+                <ChevronRight className="w-4 h-4" />
+              </Link>
+            </div>
 
-        {/* Add Entry FAB */}
-        <motion.div
-          className="fixed right-4 bottom-24 z-40"
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.95 }}
-        >
-          <Button
-            variant="calm"
-            size="icon-lg"
-            className="w-14 h-14 rounded-full shadow-float"
-          >
-            <span className="text-2xl">+</span>
-          </Button>
-        </motion.div>
+            <div className="space-y-3">
+              {recentTrips.map((trip: any) => (
+                <TripCard
+                  key={trip.id}
+                  title={trip.destination || "Unnamed Trip"}
+                  distance={trip.distance_km}
+                  time={new Date(trip.created_at).toLocaleDateString()}
+                  duration={trip.duration_minutes}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Empty State */}
+        {recentTrips.length === 0 && (
+          <section className="text-center py-12">
+            <div className="text-6xl mb-4">🗺️</div>
+            <h3 className="font-semibold text-foreground mb-2">No trips yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Start a journey and CalmTrip will track it automatically
+            </p>
+            <Button variant="calm" onClick={() => startTracking()}>
+              Start Tracking
+            </Button>
+          </section>
+        )}
       </main>
     </div>
   );
 }
 
-interface DiaryEntryCardProps {
-  image: string;
+interface TripCardProps {
   title: string;
+  distance: number;
   time: string;
-  duration: string;
-  weather: string;
+  duration: number;
 }
 
-function DiaryEntryCard({ image, title, time, duration, weather }: DiaryEntryCardProps) {
+function TripCard({ title, distance, time, duration }: TripCardProps) {
   return (
     <motion.div
-      className="flex items-center gap-3 bg-card rounded-xl p-3 shadow-soft"
+      className="flex items-center gap-3 bg-card rounded-xl p-4 shadow-soft"
       whileHover={{ x: 4 }}
       transition={{ type: "spring", stiffness: 400, damping: 20 }}
     >
-      <img
-        src={image}
-        alt={title}
-        className="w-14 h-14 rounded-lg object-cover"
-      />
+      <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-emerald-100 to-blue-100 flex items-center justify-center text-xl">
+        🗺️
+      </div>
       <div className="flex-1 min-w-0">
         <h4 className="font-medium text-foreground truncate">{title}</h4>
         <p className="text-sm text-muted-foreground">
-          {time} • {duration} • {weather === "Sunny" ? "☀️" : "💨"} {weather}
+          {formatDistance(distance)} • {duration}m • {time}
         </p>
       </div>
       <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />

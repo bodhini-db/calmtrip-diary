@@ -1,161 +1,198 @@
+import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { ChevronLeft, MapPin, Calendar, Image as ImageIcon, Heart, MessageCircle, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Link } from "react-router-dom";
-import diaryEntry1 from "@/assets/diary-entry-1.jpg";
-import diaryEntry2 from "@/assets/diary-entry-2.jpg";
-import mapPreview from "@/assets/map-preview.jpg";
+import { FloatingCard } from "@/components/ui/floating-card";
+import { ChevronRight, Calendar, MapPin, Image as ImageIcon } from "lucide-react";
+import { getTrips, getPhotos } from "@/lib/api";
+import { PhotoViewer } from "@/components/PhotoViewer";
 
-const tripData = {
-  title: "San Francisco Exploration",
-  location: "San Francisco, California",
-  dates: "Jan 25 - Jan 29, 2026",
-  stats: "14 Stops • 42 Photos",
-  entries: [
-    {
-      id: 1,
-      time: "09:30 AM",
-      title: "Arrived at Golden Gate Park",
-      description: "The morning sun filtering through the trees was absolutely breathtaking. The reflection on the water was perfectly still. It felt like a dream.",
-      image: diaryEntry1,
-      likes: 24,
-      comments: 3,
-    },
-    {
-      id: 2,
-      time: "01:45 PM",
-      title: "Lunch break at Ferry Building",
-      description: "The queue was long but totally worth the wait. The broth was so rich and creamy!",
-      image: null,
-      likes: 17,
-      comments: 5,
-    },
-    {
-      id: 3,
-      time: "05:20 PM",
-      title: "Sunset at Lands End",
-      description: "The sound of the bamboo stalks swaying in the wind is something I'll never forget. So peaceful.",
-      image: diaryEntry2,
-      likes: 45,
-      comments: 8,
-    },
-  ],
-};
+const Journal = () => {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [trips, setTrips] = useState<any[]>([]);
+  const [selectedTrip, setSelectedTrip] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<any[]>([]);
+  const [viewerPhotos, setViewerPhotos] = useState<any[]>([]);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [showViewer, setShowViewer] = useState(false);
 
-export default function Journal() {
-  return (
-    <div className="min-h-screen bg-background">
-      {/* Header with Hero Image */}
-      <div className="relative h-64">
-        <img
-          src={mapPreview}
-          alt="Trip cover"
-          className="w-full h-full object-cover"
-        />
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-        
-        {/* Back Button */}
-        <div className="absolute top-0 left-0 right-0 safe-top px-4 py-3 flex items-center justify-between">
-          <Link to="/home">
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-              <ChevronLeft className="w-6 h-6" />
-            </Button>
-          </Link>
-          <div className="flex gap-2">
-            <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
-              <Share className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
+  useEffect(() => {
+    if (!user && !loading) {
+      navigate("/");
+      return;
+    }
 
-        {/* Title Overlay */}
-        <div className="absolute bottom-4 left-4 right-4 text-white">
-          <div className="flex items-center gap-2 mb-1">
-            <MapPin className="w-4 h-4" />
-            <span className="text-sm opacity-90">{tripData.location}</span>
-          </div>
-          <h1 className="font-display font-bold text-2xl">{tripData.title}</h1>
-          <p className="text-sm opacity-80 mt-1">{tripData.dates}</p>
-          <p className="text-xs mt-2 opacity-70">{tripData.stats}</p>
-        </div>
+    if (user) {
+      loadTrips();
+    }
+  }, [user, loading, navigate]);
+
+  const loadTrips = async () => {
+    if (!user) return;
+    try {
+      const userTrips = await getTrips(user.id);
+      setTrips(userTrips);
+      if (userTrips.length > 0) {
+        setSelectedTrip(userTrips[0].id);
+        loadPhotos(userTrips[0].id);
+      }
+    } catch (error) {
+      console.error("Error loading trips:", error);
+    }
+  };
+
+  const loadPhotos = async (tripId: string) => {
+    try {
+      const tripPhotos = await getPhotos(tripId);
+      setPhotos(tripPhotos);
+      setViewerPhotos(
+        tripPhotos.map((p: any) => ({
+          id: p.id,
+          url: p.storage_path,
+          caption: p.caption,
+          emoji: p.emoji_mood,
+        }))
+      );
+    } catch (error) {
+      console.error("Error loading photos:", error);
+    }
+  };
+
+  const handleTripSelect = (tripId: string) => {
+    setSelectedTrip(tripId);
+    loadPhotos(tripId);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading diary...</p>
       </div>
+    );
+  }
 
-      {/* Timeline */}
-      <main className="px-4 py-6 space-y-6">
-        <div className="relative">
-          {/* Timeline Line */}
-          <div className="absolute left-[17px] top-0 bottom-0 w-0.5 bg-gradient-to-b from-forest via-sage to-mint" />
+  return (
+    <div className="min-h-screen bg-background pb-20">
+      {/* Header */}
+      <header className="safe-top px-4 py-6">
+        <h1 className="font-display font-bold text-2xl text-foreground mb-2">Travel Diary</h1>
+        <p className="text-muted-foreground">Your journey moments, preserved</p>
+      </header>
 
-          {/* Entries */}
-          <div className="space-y-6">
-            {tripData.entries.map((entry, index) => (
+      <main className="px-4 space-y-6">
+        {/* Trips List */}
+        {trips.length > 0 ? (
+          <div className="space-y-3">
+            {trips.map((trip: any, idx: number) => (
               <motion.div
-                key={entry.id}
-                className="relative flex gap-4"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: index * 0.1 }}
+                key={trip.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.1 }}
+                onClick={() => handleTripSelect(trip.id)}
+                className={`p-4 rounded-xl cursor-pointer transition-all ${
+                  selectedTrip === trip.id
+                    ? "bg-gradient-to-r from-emerald-50 to-blue-50 border-2 border-forest"
+                    : "bg-card border border-transparent hover:border-sage"
+                }`}
               >
-                {/* Timeline Dot */}
-                <div className="relative z-10 mt-1">
-                  <div className="timeline-dot" />
-                </div>
-
-                {/* Content Card */}
-                <div className="flex-1 bg-card rounded-2xl shadow-soft overflow-hidden">
-                  {/* Time Badge */}
-                  <div className="px-4 pt-3">
-                    <span className="text-xs font-medium text-forest bg-mint px-2 py-1 rounded-full">
-                      {entry.time}
-                    </span>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-emerald-100 to-blue-100 flex items-center justify-center text-xl">
+                    🗺️
                   </div>
-
-                  {/* Image */}
-                  {entry.image && (
-                    <div className="mt-3 mx-4">
-                      <img
-                        src={entry.image}
-                        alt={entry.title}
-                        className="w-full h-40 object-cover rounded-xl"
-                      />
-                    </div>
-                  )}
-
-                  {/* Text Content */}
-                  <div className="p-4">
-                    <h3 className="font-display font-semibold text-foreground mb-2">
-                      {entry.title}
-                    </h3>
-                    <p className="text-sm text-muted-foreground leading-relaxed">
-                      {entry.description}
-                    </p>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-4 mt-4 pt-3 border-t border-border/50">
-                      <button className="flex items-center gap-1.5 text-muted-foreground hover:text-forest transition-colors">
-                        <Heart className="w-4 h-4" />
-                        <span className="text-xs font-medium">{entry.likes}</span>
-                      </button>
-                      <button className="flex items-center gap-1.5 text-muted-foreground hover:text-forest transition-colors">
-                        <MessageCircle className="w-4 h-4" />
-                        <span className="text-xs font-medium">{entry.comments}</span>
-                      </button>
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-foreground">{trip.destination || "Unnamed Trip"}</h3>
+                    <div className="flex gap-4 text-xs text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3 h-3" />
+                        {new Date(trip.created_at).toLocaleDateString()}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3 h-3" />
+                        {trip.distance_km?.toFixed(1)}km
+                      </span>
                     </div>
                   </div>
+                  <ChevronRight className={`w-5 h-5 transition-transform ${selectedTrip === trip.id ? "rotate-90" : ""}`} />
                 </div>
               </motion.div>
             ))}
           </div>
-        </div>
+        ) : (
+          <FloatingCard className="text-center py-12">
+            <div className="text-6xl mb-4">📔</div>
+            <h3 className="font-semibold text-foreground mb-2">No trips yet</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Start tracking a journey to create diary entries
+            </p>
+            <Button variant="calm" onClick={() => navigate("/map")}>
+              Start Trip
+            </Button>
+          </FloatingCard>
+        )}
 
-        {/* Add Entry Button */}
-        <div className="pt-4">
-          <Button variant="soft" className="w-full">
-            <ImageIcon className="w-4 h-4" />
-            Add Memory
-          </Button>
-        </div>
+        {/* Photos Grid */}
+        {selectedTrip && photos.length > 0 && (
+          <motion.section
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+          >
+            <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+              <ImageIcon className="w-4 h-4" />
+              Moments ({photos.length})
+            </h2>
+            <div className="grid grid-cols-3 gap-2">
+              {photos.map((photo: any, idx: number) => (
+                <motion.div
+                  key={photo.id}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: idx * 0.05 }}
+                  onClick={() => {
+                    setSelectedPhotoIndex(idx);
+                    setShowViewer(true);
+                  }}
+                  className="relative aspect-square rounded-lg overflow-hidden cursor-pointer group"
+                >
+                  <img
+                    src={photo.storage_path}
+                    alt="Moment"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-all" />
+                  {photo.emoji_mood && (
+                    <div className="absolute bottom-1 right-1 text-lg">{photo.emoji_mood}</div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </motion.section>
+        )}
+
+        {selectedTrip && photos.length === 0 && (
+          <FloatingCard className="text-center py-8">
+            <p className="text-muted-foreground mb-3">No photos yet</p>
+            <Button size="sm" variant="outline" onClick={() => navigate("/map")}>
+              Add Photos
+            </Button>
+          </FloatingCard>
+        )}
       </main>
+
+      {/* Photo Viewer Modal */}
+      {showViewer && (
+        <PhotoViewer
+          photos={viewerPhotos}
+          initialIndex={selectedPhotoIndex}
+          onClose={() => setShowViewer(false)}
+        />
+      )}
     </div>
   );
-}
+};
+
+export default Journal;
+
