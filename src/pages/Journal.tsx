@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { FloatingCard } from "@/components/ui/floating-card";
 import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera } from "lucide-react";
+import { toast } from "sonner";
 import { getTrips, getPhotos } from "@/lib/api";
 import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
@@ -87,6 +88,34 @@ const Journal = () => {
     return 0;
   };
 
+  const handleShareTrip = async (trip: any) => {
+    const checkpoints = getTripCheckpoints(trip);
+    const totalPhotos = getTotalPhotos(trip);
+    const date = new Date(trip.start_time || trip.created_at).toLocaleDateString("en-IN", {
+      day: "numeric", month: "short", year: "numeric",
+    });
+    const text = [
+      `My CalmTrip Journey`,
+      `${trip.destination || trip.origin || "Trip"} - ${date}`,
+      `${trip.distance_km?.toFixed(1) || 0}km traveled`,
+      `${checkpoints.length} stops | ${totalPhotos} photos`,
+      trip.duration_minutes ? `Duration: ${trip.duration_minutes} min` : "",
+      "",
+      "Tracked with CalmTrip - mindful travel journaling",
+    ].filter(Boolean).join("\n");
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My CalmTrip Journey", text });
+        return;
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    toast.success("Trip summary copied to clipboard!");
+  };
+
   const openPhotoViewer = (trip: any, photoIndex: number) => {
     const photos = getTripPhotos(trip);
     setViewerPhotos(photos);
@@ -119,7 +148,7 @@ const Journal = () => {
             <h1 className="font-display font-bold text-foreground">
               {selectedTrip.destination || selectedTrip.origin || "Trip"}
             </h1>
-            <Button variant="icon" size="icon">
+            <Button variant="icon" size="icon" onClick={() => handleShareTrip(selectedTrip)}>
               <Share2 className="w-5 h-5" />
             </Button>
           </div>

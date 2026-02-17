@@ -5,7 +5,7 @@ import { useTripDetector } from "@/hooks/useTripDetector";
 import { useTripSimulator, BANGALORE_PRESETS } from "@/hooks/useTripSimulator";
 import { Button } from "@/components/ui/button";
 import { CheckpointDialog } from "@/components/CheckpointDialog";
-import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, ChevronDown } from "lucide-react";
+import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, ChevronDown, Navigation } from "lucide-react";
 import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { saveLocalTrip } from "@/lib/localTrips";
@@ -72,7 +72,7 @@ const MapView = () => {
   const { user, loading } = useAuth();
   const { toast } = useToast();
   const {
-    tripData, startTracking, stopTracking, startTrip, endTrip,
+    tripData, startTrip, endTrip,
     addLocation, addCheckpoint, addPhotoToCheckpoint, updateCheckpointName,
   } = useTripDetector();
 
@@ -85,13 +85,16 @@ const MapView = () => {
   const [checkpointDialogOpen, setCheckpointDialogOpen] = useState(false);
   const [activeCheckpointId, setActiveCheckpointId] = useState<string | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const isTrackingRef = useRef(false);
+
+  // Keep ref in sync so the GPS callback can read it
+  isTrackingRef.current = isTracking;
 
   const onCheckpointReached = useCallback((checkpoint: Checkpoint) => {
     toast({
       title: `Reached: ${checkpoint.name}!`,
       description: "Journal time! Add photos to remember this stop.",
     });
-    // Auto-open checkpoint dialog
     setActiveCheckpointId(checkpoint.id);
     setCheckpointDialogOpen(true);
   }, [toast]);
@@ -111,7 +114,7 @@ const MapView = () => {
     onCheckpointReached,
   });
 
-  // Only close dialog — do NOT auto-resume. User must click "Resume Trip".
+  // Only close dialog — do NOT auto-resume simulation. User must click "Resume Trip".
   const handleCheckpointDialogChange = (open: boolean) => {
     setCheckpointDialogOpen(open);
   };
@@ -127,13 +130,15 @@ const MapView = () => {
     }
   }, [user, loading, navigate]);
 
-  // Get current location on mount (only when not simulating)
+  // Single GPS watcher — updates blue dot AND feeds trip data when tracking
   useEffect(() => {
     if (simState.isSimulating) return;
     if (!navigator.geolocation) return;
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => setCurrentLocation([pos.coords.latitude, pos.coords.longitude]),
+      (pos) => {
+        setCurrentLocation([pos.coords.latitude, pos.coords.longitude]);
+      },
       (err) => {
         console.error("Location error:", err);
         setLocationError(true);
@@ -143,12 +148,21 @@ const MapView = () => {
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        if (!simState.isSimulating) {
-          setCurrentLocation([pos.coords.latitude, pos.coords.longitude]);
+        if (simState.isSimulating) return;
+        const loc: [number, number] = [pos.coords.latitude, pos.coords.longitude];
+        setCurrentLocation(loc);
+
+        // Feed location to trip detector when actively tracking
+        if (isTrackingRef.current) {
+          addLocation({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            timestamp: pos.timestamp,
+          });
         }
       },
       (err) => console.error("Watch error:", err),
-      { enableHighAccuracy: true, maximumAge: 5000 }
+      { enableHighAccuracy: true, maximumAge: 3000 }
     );
 
     return () => {
@@ -156,25 +170,38 @@ const MapView = () => {
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [simState.isSimulating]);
+  }, [simState.isSimulating, addLocation]);
 
+  // Real GPS trip: Start / End
   const handleToggleTracking = () => {
     if (isTracking) {
-      stopTracking();
+      // End trip
       const finalData = endTrip();
       saveTripLocally(finalData);
       setIsTracking(false);
+      toast({ title: "Trip ended!", description: "Your journey has been saved to your diary." });
     } else {
-      startTracking();
+      // Start trip
       startTrip();
       setIsTracking(true);
+
+      // Add current location as first point
+      if (currentLocation) {
+        addLocation({
+          latitude: currentLocation[0],
+          longitude: currentLocation[1],
+          timestamp: Date.now(),
+        });
+      }
+
+      toast({ title: "Trip started!", description: "Walk around — your route is being tracked." });
     }
   };
 
   const saveTripLocally = (data: typeof tripData) => {
     if (data.locations.length === 0) return;
     const origin = data.checkpoints[0]?.name || "Start";
-    const destination = data.checkpoints[data.checkpoints.length - 1]?.name || "End";
+    const destination = data.checkpoints[data.checkpoints.length - 1]?.name || origin;
     saveLocalTrip({
       user_id: user?.id || "dev-mock-user-001",
       origin,
@@ -186,9 +213,9 @@ const MapView = () => {
       route_coordinates: data.locations.map(l => [l.latitude, l.longitude] as [number, number]),
       checkpoints: data.checkpoints,
     });
-    toast({ title: "Trip saved!", description: `${origin} to ${destination} - check your Journal.` });
   };
 
+  // Simulation handlers
   const handleStartSimulation = () => {
     if (customCheckpoints.length < 2) {
       toast({ title: "Need at least 2 checkpoints", description: "Add more stops to simulate a trip." });
@@ -210,8 +237,12 @@ const MapView = () => {
     setIsTracking(false);
   };
 
+  // Checkpoint: add at current GPS location
   const handleAddCheckpoint = () => {
-    if (!currentLocation) return;
+    if (!currentLocation) {
+      toast({ title: "No location", description: "Waiting for GPS signal..." });
+      return;
+    }
     const cp: Checkpoint = {
       id: crypto.randomUUID(),
       name: "New Checkpoint",
@@ -229,7 +260,6 @@ const MapView = () => {
     if (!activeCheckpointId) return;
     addPhotoToCheckpoint(activeCheckpointId, photo);
   };
-
 
   const handleCheckpointNameUpdate = (name: string) => {
     if (activeCheckpointId) {
@@ -307,7 +337,7 @@ const MapView = () => {
           </Marker>
         ))}
 
-        {/* Upcoming checkpoint markers (grayed) */}
+        {/* Upcoming checkpoint markers (grayed, simulation only) */}
         {upcomingCheckpoints.map((sc) => (
           <Marker
             key={sc.name}
@@ -347,7 +377,14 @@ const MapView = () => {
             <ChevronLeft className="w-5 h-5" />
           </Button>
           <div className="bg-white/90 backdrop-blur-xl px-4 py-1.5 rounded-full shadow-sm border border-white/50">
-            <h1 className="font-bold text-foreground text-sm">Your Journey</h1>
+            {isTracking && !simState.isSimulating ? (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <h1 className="font-bold text-foreground text-sm">Tracking Live</h1>
+              </div>
+            ) : (
+              <h1 className="font-bold text-foreground text-sm">Your Journey</h1>
+            )}
           </div>
           <Button variant="icon" size="icon" onClick={handleRecenter} className="bg-white/90 backdrop-blur-xl shadow-sm rounded-xl border border-white/50">
             <Crosshair className="w-5 h-5" />
@@ -355,12 +392,12 @@ const MapView = () => {
         </div>
         {locationError && !simState.isSimulating && (
           <div className="bg-amber-50/90 backdrop-blur-xl text-amber-800 text-xs px-3 py-2 rounded-xl text-center border border-amber-200/50 shadow-sm">
-            Location access denied. Enable location in browser & Windows Settings &gt; Privacy &gt; Location.
+            Location access denied. Enable location in browser settings & use HTTPS.
           </div>
         )}
       </div>
 
-      {/* Checkpoint reached banner */}
+      {/* Checkpoint reached banner (simulation) */}
       {simState.pausedAtCheckpoint && (
         <div className="absolute top-16 left-4 right-4 z-[1000] bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-2xl p-4 shadow-lg animate-in slide-in-from-top border border-green-400/30">
           <p className="font-bold text-sm">Checkpoint reached!</p>
@@ -377,12 +414,12 @@ const MapView = () => {
           onClick={() => setShowSimPanel(!showSimPanel)}
         >
           <Zap className="w-3 h-3 mr-1" />
-          {showSimPanel ? "Hide" : "Simulate"}
+          {showSimPanel ? "Hide" : "Demo"}
         </Button>
 
         {showSimPanel && (
           <div className="mt-2 bg-white/95 backdrop-blur-xl rounded-2xl p-3 shadow-lg w-64 border border-white/50">
-            <p className="text-xs font-bold text-amber-800 mb-2">Trip Simulator</p>
+            <p className="text-xs font-bold text-amber-800 mb-2">Trip Simulator (Demo)</p>
 
             {/* Checkpoint list */}
             {!simState.isSimulating && (
@@ -492,9 +529,10 @@ const MapView = () => {
                   size="sm"
                   className="flex-1 text-xs"
                   onClick={handleStartSimulation}
+                  disabled={isTracking}
                 >
                   <Play className="w-3 h-3 mr-1" />
-                  Start
+                  Start Demo
                 </Button>
               ) : (
                 <>
@@ -529,42 +567,67 @@ const MapView = () => {
       {/* Bottom Controls */}
       <div className="absolute bottom-0 left-0 right-0 px-4 pb-6 pt-3 z-[1000]" style={{ background: "linear-gradient(to top, rgba(255,255,255,0.95) 60%, transparent)" }}>
         {/* Stats bar */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-3 mb-3 shadow-sm border border-white/50">
-          <div className="grid grid-cols-3 divide-x divide-gray-200">
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Distance</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{(tripData.distance / 1000).toFixed(1)}<span className="text-xs font-medium text-muted-foreground ml-0.5">km</span></p>
-            </div>
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Duration</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{tripData.isActive ? Math.round((Date.now() - tripData.startTime) / 60000) : 0}<span className="text-xs font-medium text-muted-foreground ml-0.5">min</span></p>
-            </div>
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Photos</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{totalPhotos}</p>
+        {isTracking && (
+          <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-3 mb-3 shadow-sm border border-white/50">
+            <div className="grid grid-cols-3 divide-x divide-gray-200">
+              <div className="text-center px-2">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Distance</p>
+                <p className="font-bold text-foreground text-lg leading-tight">{(tripData.distance / 1000).toFixed(1)}<span className="text-xs font-medium text-muted-foreground ml-0.5">km</span></p>
+              </div>
+              <div className="text-center px-2">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Duration</p>
+                <p className="font-bold text-foreground text-lg leading-tight">{tripData.isActive ? Math.round((Date.now() - tripData.startTime) / 60000) : 0}<span className="text-xs font-medium text-muted-foreground ml-0.5">min</span></p>
+              </div>
+              <div className="text-center px-2">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Photos</p>
+                <p className="font-bold text-foreground text-lg leading-tight">{totalPhotos}</p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Action buttons */}
         <div className="flex gap-2.5">
-          <Button
-            variant="outline"
-            size="lg"
-            className="flex-1 h-12 rounded-xl bg-white/90 backdrop-blur-xl border-gray-200 shadow-sm font-semibold"
-            onClick={handleAddCheckpoint}
-          >
-            <MapPin className="w-4 h-4 mr-1.5 text-green-600" />
-            Checkpoint
-          </Button>
+          {isTracking && !simState.isSimulating && (
+            <Button
+              variant="outline"
+              size="lg"
+              className="flex-1 h-12 rounded-xl bg-white/90 backdrop-blur-xl border-gray-200 shadow-sm font-semibold"
+              onClick={handleAddCheckpoint}
+            >
+              <MapPin className="w-4 h-4 mr-1.5 text-green-600" />
+              Checkpoint
+            </Button>
+          )}
           {!simState.isSimulating && (
             <Button
               variant={isTracking ? "destructive" : "calm"}
               size="lg"
-              className="flex-1 h-12 rounded-xl shadow-sm font-semibold"
+              className={`h-12 rounded-xl shadow-sm font-semibold ${isTracking ? "flex-1" : "w-full"}`}
               onClick={handleToggleTracking}
             >
-              {isTracking ? "End Trip" : "Start Trip"}
+              {isTracking ? (
+                <>
+                  <Square className="w-4 h-4 mr-1.5" />
+                  End Trip
+                </>
+              ) : (
+                <>
+                  <Navigation className="w-4 h-4 mr-1.5" />
+                  Start Trip
+                </>
+              )}
+            </Button>
+          )}
+          {simState.isSimulating && (
+            <Button
+              variant="outline"
+              size="lg"
+              className="flex-1 h-12 rounded-xl bg-white/90 backdrop-blur-xl border-gray-200 shadow-sm font-semibold"
+              onClick={handleAddCheckpoint}
+            >
+              <MapPin className="w-4 h-4 mr-1.5 text-green-600" />
+              Checkpoint
             </Button>
           )}
         </div>

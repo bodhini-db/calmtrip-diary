@@ -1,5 +1,10 @@
 import { Trip, Photo } from './supabase';
 
+export interface DayOfWeekData {
+  day: string;
+  trips: number;
+}
+
 export interface TravelInsights {
   totalDistanceKm: number;
   tripCount: number;
@@ -9,6 +14,7 @@ export interface TravelInsights {
   travelFrequency: string;
   totalPhotos: number;
   friendlyMessage: string;
+  tripsPerDayOfWeek: DayOfWeekData[];
 }
 
 export const calculateInsights = (trips: Trip[], photos: Photo[]): TravelInsights => {
@@ -61,6 +67,18 @@ export const calculateInsights = (trips: Trip[], photos: Photo[]): TravelInsight
     }
   }
 
+  // Trips per day of week
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayCounts = new Array(7).fill(0);
+  allTrips.forEach(trip => {
+    const day = new Date(trip.created_at).getDay();
+    dayCounts[day]++;
+  });
+  const tripsPerDayOfWeek: DayOfWeekData[] = dayNames.map((day, i) => ({
+    day,
+    trips: dayCounts[i],
+  }));
+
   return {
     totalDistanceKm: totalDistance,
     tripCount: allTrips.length,
@@ -70,6 +88,7 @@ export const calculateInsights = (trips: Trip[], photos: Photo[]): TravelInsight
     travelFrequency,
     totalPhotos: allPhotos.length,
     friendlyMessage,
+    tripsPerDayOfWeek,
   };
 };
 

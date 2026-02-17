@@ -6,16 +6,28 @@ import { Button } from "@/components/ui/button";
 import { FloatingCard } from "@/components/ui/floating-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
-import { TrendingUp, MapPin, Calendar, Footprints, Camera, Download, Share2 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { TrendingUp, MapPin, Calendar, Footprints, Camera, Download, Share2, FileJson, FileSpreadsheet, BarChart3 } from "lucide-react";
+import { toast } from "sonner";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { getTrips, getPhotos, getPrivacySettings, updatePrivacySettings } from "@/lib/api";
 import { calculateInsights, formatDistance } from "@/lib/insights";
+import { getLocalTrips } from "@/lib/localTrips";
 
 const Stats = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const [insights, setInsights] = useState<any>(null);
+  const [trips, setTrips] = useState<any[]>([]);
   const [privacySettings, setPrivacySettings] = useState<any>(null);
   const [shareData, setShareData] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!user && !loading) {
@@ -31,12 +43,29 @@ const Stats = () => {
   const loadData = async () => {
     if (!user) return;
     try {
-      const trips = await getTrips(user.id);
-      const allPhotos = await Promise.all(
-        trips.map((trip: any) => getPhotos(trip.id))
-      ).then(results => results.flat());
+      let allTrips: any[] = [];
+      try {
+        const supabaseTrips = await getTrips(user.id);
+        allTrips = supabaseTrips;
+      } catch {
+        // Supabase unavailable
+      }
 
-      const newInsights = calculateInsights(trips, allPhotos);
+      // Merge local trips
+      const localTrips = getLocalTrips(user.id);
+      for (const lt of localTrips) {
+        if (!allTrips.some((t: any) => t.id === lt.id)) {
+          allTrips.push(lt);
+        }
+      }
+
+      setTrips(allTrips);
+
+      const allPhotos = await Promise.all(
+        allTrips.filter((t: any) => !t._local).map((trip: any) => getPhotos(trip.id))
+      ).then(results => results.flat()).catch(() => []);
+
+      const newInsights = calculateInsights(allTrips, allPhotos);
       setInsights(newInsights);
 
       const settings = await getPrivacySettings(user.id);
@@ -61,7 +90,7 @@ const Stats = () => {
     }
   };
 
-  const handleExportData = () => {
+  const handleExportJSON = () => {
     if (!insights) return;
 
     const data = {
@@ -76,6 +105,69 @@ const Stats = () => {
     a.href = url;
     a.download = `calmtrip-export-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
+    window.URL.revokeObjectURL(url);
+    setExportDialogOpen(false);
+    toast.success("JSON data exported!");
+  };
+
+  const handleExportCSV = () => {
+    if (!trips.length) return;
+
+    const headers = ["Date", "Origin", "Destination", "Distance (km)", "Duration (min)", "Stops", "Photos"];
+    const rows = trips.map((trip: any) => {
+      const checkpoints = trip._checkpoints || trip.checkpoints || [];
+      const photos = checkpoints.reduce((sum: number, cp: any) => sum + (cp.photos?.length || 0), 0);
+      return [
+        new Date(trip.created_at).toLocaleDateString(),
+        trip.origin || "",
+        trip.destination || "",
+        (trip.distance_km || 0).toFixed(2),
+        trip.duration_minutes || 0,
+        checkpoints.length,
+        photos,
+      ].map(v => `"${v}"`).join(",");
+    });
+
+    const csv = [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `calmtrip-trips-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+    setExportDialogOpen(false);
+    toast.success("CSV data exported!");
+  };
+
+  const handleShareReport = async () => {
+    if (!insights) return;
+
+    const text = [
+      "My CalmTrip Travel Report",
+      "========================",
+      "",
+      `Total Distance: ${formatDistance(insights.totalDistanceKm)}`,
+      `Total Trips: ${insights.tripCount}`,
+      `Photos Captured: ${insights.totalPhotos}`,
+      `Travel Style: ${insights.travelFrequency}`,
+      insights.mostVisitedLocation ? `Favorite Place: ${insights.mostVisitedLocation}` : "",
+      `This Week: ${formatDistance(insights.weeklyDistance)}`,
+      `This Month: ${formatDistance(insights.monthlyDistance)}`,
+      "",
+      "Tracked with CalmTrip - mindful travel journaling",
+    ].filter(Boolean).join("\n");
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My CalmTrip Report", text });
+        return;
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    toast.success("Travel report copied to clipboard!");
   };
 
   if (loading) {
@@ -146,6 +238,35 @@ const Stats = () => {
           </section>
         )}
 
+        {/* Trip Activity Chart */}
+        {insights && insights.tripsPerDayOfWeek && (
+          <section>
+            <h2 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+              <BarChart3 className="w-4 h-4" />
+              Trip Activity
+            </h2>
+            <FloatingCard className="p-4">
+              <p className="text-sm text-muted-foreground mb-3">Trips by day of the week</p>
+              <ResponsiveContainer width="100%" height={180}>
+                <BarChart data={insights.tripsPerDayOfWeek} margin={{ top: 5, right: 5, bottom: 5, left: -20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="day" tick={{ fontSize: 12, fill: "#6b7280" }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "#6b7280" }} />
+                  <Tooltip
+                    contentStyle={{
+                      borderRadius: "8px",
+                      border: "1px solid #d1d5db",
+                      fontSize: "13px",
+                    }}
+                    formatter={(value: number) => [`${value} trip${value !== 1 ? "s" : ""}`, "Trips"]}
+                  />
+                  <Bar dataKey="trips" fill="#10b981" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </FloatingCard>
+          </section>
+        )}
+
         {/* Monthly Stats */}
         {insights && (
           <section>
@@ -210,7 +331,7 @@ const Stats = () => {
                   variant="outline"
                   size="sm"
                   className="flex-1"
-                  onClick={handleExportData}
+                  onClick={() => setExportDialogOpen(true)}
                 >
                   <Download className="w-4 h-4" />
                   Export Data
@@ -219,6 +340,7 @@ const Stats = () => {
                   variant="outline"
                   size="sm"
                   className="flex-1"
+                  onClick={handleShareReport}
                 >
                   <Share2 className="w-4 h-4" />
                   Share Report
@@ -240,6 +362,44 @@ const Stats = () => {
           </FloatingCard>
         </section>
       </main>
+
+      {/* Export Dialog */}
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="max-w-sm mx-auto rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Export Your Data</DialogTitle>
+            <DialogDescription>
+              Choose a format to download your travel data.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <button
+              onClick={handleExportJSON}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-border hover:bg-emerald-50 transition-colors text-left"
+            >
+              <div className="w-10 h-10 rounded-lg bg-emerald-100 flex items-center justify-center">
+                <FileJson className="w-5 h-5 text-emerald-700" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground text-sm">JSON Format</h3>
+                <p className="text-xs text-muted-foreground">Full insights data with all details</p>
+              </div>
+            </button>
+            <button
+              onClick={handleExportCSV}
+              className="w-full flex items-center gap-4 p-4 rounded-xl border border-border hover:bg-blue-50 transition-colors text-left"
+            >
+              <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                <FileSpreadsheet className="w-5 h-5 text-blue-700" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground text-sm">CSV Format</h3>
+                <p className="text-xs text-muted-foreground">Trip table for spreadsheets</p>
+              </div>
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
