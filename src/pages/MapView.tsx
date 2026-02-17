@@ -10,7 +10,7 @@ import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { saveLocalTrip } from "@/lib/localTrips";
 import L from "leaflet";
-import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap, Circle } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
 function MapController({ currentLocation, shouldCenter }: { currentLocation: [number, number] | null; shouldCenter: boolean }) {
@@ -24,47 +24,38 @@ function MapController({ currentLocation, shouldCenter }: { currentLocation: [nu
 }
 
 const currentLocationIcon = L.divIcon({
-  html: `
-    <div style="position:relative;width:24px;height:24px">
-      <div style="position:absolute;inset:-8px;background:rgba(59,130,246,0.15);border-radius:50%;animation:pulse-ring 2s ease-out infinite"></div>
-      <div style="width:24px;height:24px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:3px solid white;border-radius:50%;box-shadow:0 2px 12px rgba(59,130,246,0.4)"></div>
-    </div>
-  `,
+  html: `<div style="width:20px;height:20px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(59,130,246,0.5)"></div>`,
   className: "current-location-marker",
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
+  iconSize: [20, 20],
+  iconAnchor: [10, 10],
 });
 
 const createCheckpointIcon = (name: string, reached: boolean) => {
-  const bg = reached
-    ? 'linear-gradient(135deg,#22c55e,#16a34a)'
-    : 'linear-gradient(135deg,#94a3b8,#64748b)';
   return L.divIcon({
     html: `
       <div style="
-        display:flex; align-items:center; gap:5px;
-        background:${bg};
-        color:white; padding:5px 12px; border-radius:20px;
+        display:flex; align-items:center; gap:4px;
+        background:${reached ? '#22c55e' : '#94a3b8'};
+        color:white; padding:4px 10px; border-radius:16px;
         font-size:11px; font-weight:600; white-space:nowrap;
-        box-shadow:0 2px 12px rgba(0,0,0,0.15);
+        box-shadow:0 2px 8px rgba(0,0,0,0.2);
         border:2px solid white;
-        letter-spacing:0.3px;
       ">
-        <span style="font-size:10px">${reached ? '\u2713' : '\u25CB'}</span>
+        <span style="font-size:12px">${reached ? '\u2713' : '\u25CF'}</span>
         ${name}
       </div>
     `,
     className: "checkpoint-marker",
-    iconSize: [140, 30],
-    iconAnchor: [70, 15],
+    iconSize: [140, 28],
+    iconAnchor: [70, 14],
   });
 };
 
 const createPhotoIcon = (url?: string) => {
   const html = url
-    ? `<div style="width:44px;height:44px;border-radius:12px;overflow:hidden;border:2.5px solid white;box-shadow:0 4px 12px rgba(0,0,0,0.12);background-image:url('${url}');background-size:cover;background-position:center;transition:transform 0.2s"></div>`
-    : `<div style="width:44px;height:44px;border-radius:12px;background:#f1f5f9;border:2.5px solid white;box-shadow:0 4px 12px rgba(0,0,0,0.08)"></div>`;
-  return L.divIcon({ html, className: "photo-marker", iconSize: [44, 44], iconAnchor: [22, 22] });
+    ? `<div style="width:48px;height:48px;border-radius:10px;overflow:hidden;border:3px solid white;box-shadow:0 4px 8px rgba(0,0,0,0.15);background-image:url('${url}');background-size:cover;background-position:center"></div>`
+    : `<div style="width:48px;height:48px;border-radius:10px;background:#e2e8f0;border:3px solid white"></div>`;
+  return L.divIcon({ html, className: "photo-marker", iconSize: [48, 48], iconAnchor: [24, 24] });
 };
 
 const MapView = () => {
@@ -266,24 +257,23 @@ const MapView = () => {
 
   return (
     <div className="relative w-full h-screen flex flex-col">
-      <MapContainer center={center} zoom={15} className="flex-1 h-full w-full" zoomControl={false} attributionControl={false}>
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>'
-        />
+      <MapContainer center={center} zoom={15} className="flex-1 h-full w-full">
+        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="&copy; OpenStreetMap contributors" />
         <MapController currentLocation={currentLocation} shouldCenter={shouldCenter} />
 
-        {/* Route polyline — shadow + main line for depth */}
+        {/* Route polyline */}
         {polyPositions.length > 1 && (
-          <>
-            <Polyline positions={polyPositions} pathOptions={{ color: "#16a34a", weight: 7, opacity: 0.2, lineCap: "round", lineJoin: "round" }} />
-            <Polyline positions={polyPositions} pathOptions={{ color: "#22c55e", weight: 4, opacity: 0.95, lineCap: "round", lineJoin: "round" }} />
-          </>
+          <Polyline positions={polyPositions} pathOptions={{ color: "#22c55e", weight: 4, opacity: 0.9 }} />
         )}
 
         {/* Current location */}
         {currentLocation && (
-          <Marker position={currentLocation} icon={currentLocationIcon} />
+          <>
+            <Circle center={currentLocation} radius={30} pathOptions={{ color: "#3b82f6", fillColor: "#3b82f6", fillOpacity: 0.15, weight: 1 }} />
+            <Marker position={currentLocation} icon={currentLocationIcon}>
+              <Popup>Your current location</Popup>
+            </Marker>
+          </>
         )}
 
         {/* Reached checkpoint markers */}
@@ -343,18 +333,16 @@ const MapView = () => {
       {/* Header */}
       <div className="absolute top-0 left-0 right-0 safe-top px-4 py-3 flex flex-col gap-2 z-[1000]">
         <div className="flex items-center justify-between">
-          <Button variant="icon" size="icon" onClick={() => navigate(-1)} className="bg-white/90 backdrop-blur-xl shadow-sm rounded-xl border border-white/50">
+          <Button variant="icon" size="icon" onClick={() => navigate(-1)} className="bg-white/80 backdrop-blur">
             <ChevronLeft className="w-5 h-5" />
           </Button>
-          <div className="bg-white/90 backdrop-blur-xl px-4 py-1.5 rounded-full shadow-sm border border-white/50">
-            <h1 className="font-bold text-foreground text-sm">Your Journey</h1>
-          </div>
-          <Button variant="icon" size="icon" onClick={handleRecenter} className="bg-white/90 backdrop-blur-xl shadow-sm rounded-xl border border-white/50">
+          <h1 className="font-bold text-foreground">Your Journey</h1>
+          <Button variant="icon" size="icon" onClick={handleRecenter} className="bg-white/80 backdrop-blur">
             <Crosshair className="w-5 h-5" />
           </Button>
         </div>
         {locationError && !simState.isSimulating && (
-          <div className="bg-amber-50/90 backdrop-blur-xl text-amber-800 text-xs px-3 py-2 rounded-xl text-center border border-amber-200/50 shadow-sm">
+          <div className="bg-amber-100 text-amber-800 text-xs px-3 py-2 rounded-lg text-center">
             Location access denied. Enable location in browser & Windows Settings &gt; Privacy &gt; Location.
           </div>
         )}
@@ -362,9 +350,9 @@ const MapView = () => {
 
       {/* Checkpoint reached banner */}
       {simState.pausedAtCheckpoint && (
-        <div className="absolute top-16 left-4 right-4 z-[1000] bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-2xl p-4 shadow-lg animate-in slide-in-from-top border border-green-400/30">
+        <div className="absolute top-14 left-4 right-4 z-[1000] bg-green-500 text-white rounded-xl p-4 shadow-lg animate-in slide-in-from-top">
           <p className="font-bold text-sm">Checkpoint reached!</p>
-          <p className="text-xs opacity-90 mt-0.5">Add photos and a caption, then tap Resume Trip.</p>
+          <p className="text-xs opacity-90">Add photos to your journal, then close the dialog to continue.</p>
         </div>
       )}
 
@@ -373,7 +361,7 @@ const MapView = () => {
         <Button
           variant="outline"
           size="sm"
-          className="bg-white/90 backdrop-blur-xl border-amber-200 text-amber-700 text-xs shadow-sm rounded-xl"
+          className="bg-amber-50 border-amber-300 text-amber-800 text-xs shadow-md"
           onClick={() => setShowSimPanel(!showSimPanel)}
         >
           <Zap className="w-3 h-3 mr-1" />
@@ -381,7 +369,7 @@ const MapView = () => {
         </Button>
 
         {showSimPanel && (
-          <div className="mt-2 bg-white/95 backdrop-blur-xl rounded-2xl p-3 shadow-lg w-64 border border-white/50">
+          <div className="mt-2 bg-white/95 backdrop-blur rounded-xl p-3 shadow-lg w-64 border">
             <p className="text-xs font-bold text-amber-800 mb-2">Trip Simulator</p>
 
             {/* Checkpoint list */}
@@ -527,41 +515,32 @@ const MapView = () => {
       </div>
 
       {/* Bottom Controls */}
-      <div className="absolute bottom-0 left-0 right-0 px-4 pb-6 pt-3 z-[1000]" style={{ background: "linear-gradient(to top, rgba(255,255,255,0.95) 60%, transparent)" }}>
-        {/* Stats bar */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-3 mb-3 shadow-sm border border-white/50">
-          <div className="grid grid-cols-3 divide-x divide-gray-200">
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Distance</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{(tripData.distance / 1000).toFixed(1)}<span className="text-xs font-medium text-muted-foreground ml-0.5">km</span></p>
-            </div>
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Duration</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{tripData.isActive ? Math.round((Date.now() - tripData.startTime) / 60000) : 0}<span className="text-xs font-medium text-muted-foreground ml-0.5">min</span></p>
-            </div>
-            <div className="text-center px-2">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">Photos</p>
-              <p className="font-bold text-foreground text-lg leading-tight">{totalPhotos}</p>
-            </div>
+      <div className="absolute bottom-0 left-0 right-0 px-4 py-6 space-y-3 z-[1000]">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Distance</p>
+            <p className="font-bold text-foreground">{(tripData.distance / 1000).toFixed(2)}km</p>
+          </div>
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Duration</p>
+            <p className="font-bold text-foreground">{tripData.isActive ? Math.round((Date.now() - tripData.startTime) / 60000) : 0}m</p>
+          </div>
+          <div className="bg-white/90 backdrop-blur rounded-lg p-3 text-center">
+            <p className="text-xs text-muted-foreground">Photos</p>
+            <p className="font-bold text-foreground">{totalPhotos}</p>
           </div>
         </div>
 
-        {/* Action buttons */}
-        <div className="flex gap-2.5">
-          <Button
-            variant="outline"
-            size="lg"
-            className="flex-1 h-12 rounded-xl bg-white/90 backdrop-blur-xl border-gray-200 shadow-sm font-semibold"
-            onClick={handleAddCheckpoint}
-          >
-            <MapPin className="w-4 h-4 mr-1.5 text-green-600" />
+        <div className="flex gap-2">
+          <Button variant="outline" size="lg" className="flex-1" onClick={handleAddCheckpoint}>
+            <MapPin className="w-4 h-4 mr-1" />
             Checkpoint
           </Button>
           {!simState.isSimulating && (
             <Button
               variant={isTracking ? "destructive" : "calm"}
               size="lg"
-              className="flex-1 h-12 rounded-xl shadow-sm font-semibold"
+              className="flex-1"
               onClick={handleToggleTracking}
             >
               {isTracking ? "End Trip" : "Start Trip"}
