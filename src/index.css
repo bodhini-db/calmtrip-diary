@@ -255,12 +255,51 @@
   }
 }
 
-/* Mapbox overrides */
-.mapboxgl-canvas {
-  @apply rounded-2xl;
+/* Leaflet / Map overrides */
+.leaflet-container {
+  font-family: 'Plus Jakarta Sans', sans-serif;
 }
 
-.mapboxgl-ctrl-logo,
-.mapboxgl-ctrl-attrib {
+.leaflet-popup-content-wrapper {
+  border-radius: 12px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1) !important;
+  border: 1px solid rgba(0,0,0,0.05) !important;
+}
+
+.leaflet-popup-tip {
+  box-shadow: none !important;
+}
+
+.leaflet-popup-close-button {
   display: none !important;
+}
+
+/* Hide default leaflet controls */
+.leaflet-control-zoom {
+  display: none !important;
+}
+
+/* Remove leaflet marker shadows */
+.leaflet-marker-shadow {
+  display: none !important;
+}
+
+/* Clean up custom marker containers */
+.current-location-marker,
+.checkpoint-marker,
+.photo-marker {
+  background: none !important;
+  border: none !important;
+}
+
+/* Pulsing ring animation for current location */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
 }

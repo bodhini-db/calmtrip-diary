@@ -69,6 +69,23 @@ export interface Photo {
   created_at: string;
 }
 
+export interface CheckpointPhoto {
+  id: string;
+  objectUrl: string;
+  caption?: string;
+  timestamp: number;
+}
+
+export interface Checkpoint {
+  id: string;
+  name: string;
+  description?: string;
+  lat: number;
+  lng: number;
+  timestamp: number;
+  photos: CheckpointPhoto[];
+}
+
 export interface PrivacySettings {
   user_id: string;
   allow_anonymous_sharing: boolean;
