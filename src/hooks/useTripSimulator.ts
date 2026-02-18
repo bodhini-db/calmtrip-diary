@@ -120,11 +120,7 @@ export const useTripSimulator = (options: SimulatorOptions) => {
     reachedCheckpoints: [],
   });
 
-  const [customCheckpoints, setCustomCheckpoints] = useState<PresetLocation[]>([
-    BANGALORE_PRESETS[0], // HSR Layout
-    BANGALORE_PRESETS[1], // Toit
-    BANGALORE_PRESETS[2], // Cubbon Park
-  ]);
+  const [customCheckpoints, setCustomCheckpoints] = useState<PresetLocation[]>([]);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const indexRef = useRef(0);

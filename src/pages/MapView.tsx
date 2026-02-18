@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { useTripDetector } from "@/hooks/useTripDetector";
 import { useTripSimulator, BANGALORE_PRESETS } from "@/hooks/useTripSimulator";
@@ -10,6 +10,7 @@ import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { saveLocalTrip } from "@/lib/localTrips";
 import { createTrip, uploadTripPhoto } from "@/lib/api";
+import { AiNearbyPlaces } from "@/components/AiNearbyPlaces";
 import L from "leaflet";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -70,6 +71,7 @@ const createPhotoIcon = (url?: string) => {
 
 const MapView = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, loading } = useAuth();
   const { toast } = useToast();
   const {
@@ -109,7 +111,7 @@ const MapView = () => {
   const {
     simState, customCheckpoints, routePoints,
     startSimulation, pauseSimulation, resumeSimulation, stopSimulation, setSpeed,
-    addCustomCheckpoint, removeCheckpoint,
+    addCustomCheckpoint, removeCheckpoint, updateCheckpoints,
   } = useTripSimulator({
     onLocationUpdate: (lat, lng) => {
       setCurrentLocation([lat, lng]);
@@ -135,6 +137,16 @@ const MapView = () => {
       navigate("/");
     }
   }, [user, loading, navigate]);
+
+  // Load AI-generated plan from AiTripPlanner (passed via router state)
+  useEffect(() => {
+    const aiPlan = (location.state as any)?.aiPlan;
+    if (!aiPlan?.checkpoints?.length) return;
+    updateCheckpoints(aiPlan.checkpoints);
+    setShowSimPanel(true);
+    // Clear state so refreshing doesn't re-load
+    window.history.replaceState({}, "");
+  }, []);
 
   // Single GPS watcher
   useEffect(() => {
@@ -204,7 +216,7 @@ const MapView = () => {
 
     if (user) {
       try {
-        const trip = await createTrip({
+        const tripPayload: any = {
           user_id: user.id,
           origin,
           destination,
@@ -214,7 +226,19 @@ const MapView = () => {
           duration_minutes: durationMinutes,
           route_coordinates: routeCoords,
           checkpoints: checkpointsMeta,
-        });
+        };
+        let trip: any;
+        try {
+          trip = await createTrip(tripPayload);
+        } catch (e: any) {
+          // If checkpoints column doesn't exist yet (migration not run), retry without it
+          if (e?.code === 'PGRST204' || e?.message?.includes('checkpoints')) {
+            const { checkpoints: _dropped, ...withoutCheckpoints } = tripPayload;
+            trip = await createTrip(withoutCheckpoints);
+          } else {
+            throw e;
+          }
+        }
         tripId = trip.id;
         savedToSupabase = true;
 
@@ -366,9 +390,10 @@ const MapView = () => {
 
   const activeCheckpoint = tripData.checkpoints.find(cp => cp.id === activeCheckpointId) || null;
 
+  // Show planned stops on map at all times; during simulation, hide ones already reached
   const upcomingCheckpoints = simState.isSimulating
     ? customCheckpoints.filter(sc => !simState.reachedCheckpoints.includes(sc.name))
-    : [];
+    : customCheckpoints;
 
   return (
     <div className="relative w-full h-screen flex flex-col">
@@ -650,6 +675,13 @@ const MapView = () => {
             </div>
           </div>
         )}
+
+        <div className="flex gap-2 mb-2">
+          <AiNearbyPlaces
+            currentLocation={currentLocation}
+            onAddToRoute={addCustomCheckpoint}
+          />
+        </div>
 
         <div className="flex gap-2.5">
           {isTracking && !simState.isSimulating && (

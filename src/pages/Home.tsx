@@ -7,7 +7,9 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getLocalTrips, LocalTrip } from "@/lib/localTrips";
+import { getTrips } from "@/lib/api";
 import { formatDistance } from "@/lib/insights";
+import { AiTripPlanner } from "@/components/AiTripPlanner";
 import mapPreview from "@/assets/map-preview.jpg";
 
 export default function Home() {
@@ -25,9 +27,18 @@ export default function Home() {
     if (user) {
       const email = user.email?.split("@")[0] || "Traveler";
       setUserName(email.charAt(0).toUpperCase() + email.slice(1));
-      // Load local trips (no Supabase needed)
+      // Merge Supabase + local trips
       const localTrips = getLocalTrips(user.id);
       setTrips(localTrips);
+      getTrips(user.id).then(remote => {
+        setTrips(prev => {
+          const merged = [...remote as any[]];
+          for (const lt of prev) {
+            if (!merged.some(t => t.id === lt.id)) merged.push(lt);
+          }
+          return merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        });
+      }).catch(() => {});
     }
   }, [user, loading, navigate]);
 
@@ -104,6 +115,15 @@ export default function Home() {
             </div>
           </div>
         </FloatingCard>
+
+        {/* AI Trip Planner */}
+        <AiTripPlanner
+          pastTripSummary={
+            trips.length > 0
+              ? `${trips.length} trips, favourite areas: ${[...new Set(trips.map((t: any) => t.destination || t.origin).filter(Boolean))].slice(0, 3).join(", ")}`
+              : ""
+          }
+        />
 
         {/* Stats */}
         {trips.length > 0 && (

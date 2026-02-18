@@ -7,6 +7,7 @@ import { FloatingCard } from "@/components/ui/floating-card";
 import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { getTrips, getTripPhotosList, getPhotoPublicUrl } from "@/lib/api";
+import { AiJournalWriter } from "@/components/AiJournalWriter";
 import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
 
@@ -326,6 +327,9 @@ const Journal = () => {
             </FloatingCard>
           )}
         </main>
+
+        {/* AI Journal Writer */}
+        <AiJournalWriter trip={selectedTrip} />
 
         {showViewer && (
           <PhotoViewer
