@@ -24,24 +24,28 @@ export const getCurrentUser = async () => {
 };
 
 export const signUp = async (email: string, password: string) => {
-  return supabase.auth.signUp({
-    email,
-    password,
-  });
+  return supabase.auth.signUp({ email, password });
 };
 
 export const signIn = async (email: string, password: string) => {
-  return supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
+  return supabase.auth.signInWithPassword({ email, password });
 };
 
 export const signOut = async () => {
   return supabase.auth.signOut();
 };
 
-// Types for database operations
+// ── Database types ────────────────────────────────────────────
+
+export interface TripCheckpointMeta {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  timestamp: number;
+  description?: string;
+}
+
 export interface Trip {
   id: string;
   user_id: string;
@@ -52,6 +56,8 @@ export interface Trip {
   distance_km: number;
   duration_minutes: number;
   route_coordinates: Array<[number, number]>;
+  /** Checkpoint metadata (no photo blobs). Photos live in the photos table. */
+  checkpoints: TripCheckpointMeta[];
   purpose?: string;
   created_at: string;
 }
@@ -60,9 +66,11 @@ export interface Photo {
   id: string;
   trip_id: string;
   user_id: string;
+  /** Matches id field inside trips.checkpoints JSONB array */
+  checkpoint_id?: string;
   storage_path: string;
-  latitude: number;
-  longitude: number;
+  latitude?: number;
+  longitude?: number;
   caption?: string;
   emoji_mood?: string;
   taken_at: string;
@@ -88,8 +96,9 @@ export interface Checkpoint {
 
 export interface PrivacySettings {
   user_id: string;
+  gps_tracking_enabled: boolean;
+  photo_geotagging_enabled: boolean;
   allow_anonymous_sharing: boolean;
   allow_research_data: boolean;
-  gps_tracking_enabled: boolean;
   updated_at: string;
 }

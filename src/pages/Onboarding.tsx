@@ -6,6 +6,7 @@ import { ToggleSwitch } from "@/components/ui/toggle-switch";
 import { MapPin, Shield, Pause, ChevronRight, ChevronLeft, AlertCircle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { signUp, signIn } from "@/lib/supabase";
+import { updatePrivacySettings } from "@/lib/api";
 import paperAirplane from "@/assets/paper-airplane.png";
 
 const slides = [
@@ -62,6 +63,7 @@ export default function Onboarding() {
   const [isSignUp, setIsSignUp] = useState(true);
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState(false);
 
   useEffect(() => {
     if (user && !loading) {
@@ -93,13 +95,31 @@ export default function Onboarding() {
 
     try {
       if (isSignUp) {
-        const { error } = await signUp(email, password);
+        const { data, error } = await signUp(email, password);
         if (error) throw error;
+
+        // Save the consent settings chosen during onboarding
+        if (data.user) {
+          await updatePrivacySettings(data.user.id, {
+            gps_tracking_enabled: consents.gpsTracking,
+            photo_geotagging_enabled: consents.photoGeotagging,
+            allow_anonymous_sharing: consents.anonymousResearch,
+            allow_research_data: consents.anonymousResearch,
+          });
+        }
+
+        // If Supabase requires email confirmation there is no session yet
+        if (!data.session) {
+          setConfirmEmail(true);
+          setAuthLoading(false);
+          return;
+        }
+        // Otherwise useAuth will pick up the session and navigate via useEffect
       } else {
         const { error } = await signIn(email, password);
         if (error) throw error;
+        // Navigate will happen automatically when user state updates
       }
-      // Navigate will happen automatically when user state updates
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "Authentication failed");
     } finally {
@@ -253,14 +273,34 @@ export default function Onboarding() {
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                 >
-                  {isSignUp ? "Create Account" : "Welcome Back"}
+                  {confirmEmail ? "Check your email" : isSignUp ? "Create Account" : "Welcome Back"}
                 </motion.h1>
                 <p className="text-muted-foreground">
-                  {isSignUp
+                  {confirmEmail
+                    ? `We sent a confirmation link to ${email}. Click it, then sign in below.`
+                    : isSignUp
                     ? "Join CalmTrip to track your journeys"
                     : "Sign in to your account"}
                 </p>
               </div>
+
+              {confirmEmail && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-center"
+                >
+                  <p className="text-sm text-emerald-700 font-medium">Account created!</p>
+                  <p className="text-xs text-emerald-600 mt-1">After confirming your email, sign in below.</p>
+                  <button
+                    type="button"
+                    className="mt-2 text-sm text-forest underline"
+                    onClick={() => { setConfirmEmail(false); setIsSignUp(false); }}
+                  >
+                    Go to sign in
+                  </button>
+                </motion.div>
+              )}
 
               {authError && (
                 <motion.div

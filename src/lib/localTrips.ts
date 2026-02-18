@@ -29,17 +29,29 @@ export function getLocalTrips(userId: string): LocalTrip[] {
   }
 }
 
-export function saveLocalTrip(trip: Omit<LocalTrip, 'id' | 'created_at'>): LocalTrip {
+/**
+ * Save a trip locally. If `id` is provided it is used as-is (so the local
+ * copy shares the same ID as the Supabase record, enabling deduplication).
+ */
+export function saveLocalTrip(
+  trip: Omit<LocalTrip, 'id' | 'created_at'> & { id?: string }
+): LocalTrip {
   const newTrip: LocalTrip = {
     ...trip,
-    id: crypto.randomUUID(),
+    id: trip.id || crypto.randomUUID(),
     created_at: new Date().toISOString(),
   };
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     const all: LocalTrip[] = raw ? JSON.parse(raw) : [];
-    all.push(newTrip);
+    // Replace existing entry if same id, otherwise append
+    const idx = all.findIndex(t => t.id === newTrip.id);
+    if (idx >= 0) {
+      all[idx] = newTrip;
+    } else {
+      all.push(newTrip);
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
   } catch (err) {
     console.error('Failed to save trip locally:', err);

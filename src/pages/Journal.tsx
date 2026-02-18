@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { FloatingCard } from "@/components/ui/floating-card";
 import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera } from "lucide-react";
 import { toast } from "sonner";
-import { getTrips, getPhotos } from "@/lib/api";
+import { getTrips, getTripPhotosList, getPhotoPublicUrl } from "@/lib/api";
 import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
 
@@ -15,6 +15,7 @@ const Journal = () => {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<any[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<any | null>(null);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [viewerPhotos, setViewerPhotos] = useState<any[]>([]);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showViewer, setShowViewer] = useState(false);
@@ -30,63 +31,98 @@ const Journal = () => {
   const loadTrips = async () => {
     if (!user) return;
 
-    let allTrips: any[] = [];
+    let supabaseTrips: any[] = [];
     try {
-      const supabaseTrips = await getTrips(user.id);
-      allTrips = supabaseTrips;
+      const raw = await getTrips(user.id);
+      // Mark as Supabase trips; photos loaded on demand
+      supabaseTrips = raw.map(t => ({
+        ...t,
+        _local: false,
+        _checkpoints: (t.checkpoints || []).map((cp: any) => ({
+          ...cp,
+          photos: [], // populated lazily when trip is opened
+        })),
+        _photosLoaded: false,
+      }));
     } catch {
-      // Supabase unavailable
+      // Supabase unavailable — fall back to local only
     }
 
-    const localTrips = getLocalTrips(user.id);
-    const localAsTrips = localTrips.map(lt => ({
-      id: lt.id,
-      user_id: lt.user_id,
-      origin: lt.origin,
-      destination: lt.destination,
-      start_time: lt.start_time,
-      end_time: lt.end_time,
-      distance_km: lt.distance_km,
-      duration_minutes: lt.duration_minutes,
-      route_coordinates: lt.route_coordinates,
-      created_at: lt.created_at,
+    const localTrips = getLocalTrips(user.id).map(lt => ({
+      ...lt,
       _local: true,
       _checkpoints: lt.checkpoints,
+      _photosLoaded: true,
     }));
 
-    const merged = [...allTrips];
-    for (const lt of localAsTrips) {
+    // Merge: Supabase is source of truth; local fills gaps
+    const merged = [...supabaseTrips];
+    for (const lt of localTrips) {
       if (!merged.some(t => t.id === lt.id)) merged.push(lt);
     }
     merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setTrips(merged);
   };
 
+  /**
+   * When a Supabase trip is selected, load its photos from the photos table,
+   * convert storage_path → public URL, and reconstruct checkpoint photo arrays.
+   */
+  const handleSelectTrip = async (trip: any) => {
+    if (!trip._local && !trip._photosLoaded) {
+      setLoadingPhotos(true);
+      try {
+        const photos = await getTripPhotosList(trip.id);
+
+        // Group photos by checkpoint_id
+        const byCheckpoint = new Map<string, any[]>();
+        for (const p of photos) {
+          const key = p.checkpoint_id || '__uncategorized__';
+          if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
+          byCheckpoint.get(key)!.push({
+            id: p.id,
+            objectUrl: getPhotoPublicUrl(p.storage_path),
+            caption: p.caption,
+            timestamp: new Date(p.taken_at).getTime(),
+          });
+        }
+
+        const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
+          ...cp,
+          photos: byCheckpoint.get(cp.id) || [],
+        }));
+
+        const enriched = { ...trip, _checkpoints: enrichedCheckpoints, _photosLoaded: true };
+
+        // Update the list so the thumbnail also refreshes
+        setTrips(prev => prev.map(t => t.id === trip.id ? enriched : t));
+        setSelectedTrip(enriched);
+      } catch {
+        setSelectedTrip(trip);
+      } finally {
+        setLoadingPhotos(false);
+      }
+    } else {
+      setSelectedTrip(trip);
+    }
+  };
+
   const getTripPhotos = (trip: any) => {
-    if (trip._local && trip._checkpoints) {
-      return trip._checkpoints.flatMap((cp: any) =>
-        (cp.photos || []).map((p: any) => ({
-          id: p.id,
-          url: p.objectUrl,
-          caption: p.caption || cp.name,
-          checkpointName: cp.name,
-        }))
-      );
-    }
-    return [];
+    if (!trip._checkpoints) return [];
+    return trip._checkpoints.flatMap((cp: any) =>
+      (cp.photos || []).map((p: any) => ({
+        id: p.id,
+        url: p.objectUrl,
+        caption: p.caption || cp.name,
+        checkpointName: cp.name,
+      }))
+    );
   };
 
-  const getTripCheckpoints = (trip: any) => {
-    if (trip._local && trip._checkpoints) return trip._checkpoints;
-    return [];
-  };
+  const getTripCheckpoints = (trip: any): any[] => trip._checkpoints || [];
 
-  const getTotalPhotos = (trip: any) => {
-    if (trip._local && trip._checkpoints) {
-      return trip._checkpoints.reduce((sum: number, cp: any) => sum + (cp.photos?.length || 0), 0);
-    }
-    return 0;
-  };
+  const getTotalPhotos = (trip: any) =>
+    (trip._checkpoints || []).reduce((sum: number, cp: any) => sum + (cp.photos?.length || 0), 0);
 
   const handleShareTrip = async (trip: any) => {
     const checkpoints = getTripCheckpoints(trip);
@@ -131,7 +167,7 @@ const Journal = () => {
     );
   }
 
-  // Timeline detail view for a selected trip
+  // ── Trip detail (timeline) view ──────────────────────────────
   if (selectedTrip) {
     const checkpoints = getTripCheckpoints(selectedTrip);
     const allPhotos = getTripPhotos(selectedTrip);
@@ -153,7 +189,6 @@ const Journal = () => {
             </Button>
           </div>
 
-          {/* Trip Hero */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -184,16 +219,24 @@ const Journal = () => {
           </motion.div>
         </header>
 
+        {/* Loading photos indicator */}
+        {loadingPhotos && (
+          <div className="px-4 mb-4">
+            <div className="bg-emerald-50 rounded-xl p-3 text-center">
+              <p className="text-xs text-emerald-600 animate-pulse">Loading photos...</p>
+            </div>
+          </div>
+        )}
+
         {/* Timeline */}
         <main className="px-4">
           {checkpoints.length > 0 ? (
             <div className="relative">
-              {/* Timeline line */}
               <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-emerald-400 via-emerald-300 to-emerald-100" />
 
               <div className="space-y-0">
                 {checkpoints.map((cp: any, idx: number) => {
-                  const cpPhotos = (cp.photos || []);
+                  const cpPhotos = cp.photos || [];
                   const time = cp.timestamp
                     ? new Date(cp.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
                     : "";
@@ -206,27 +249,22 @@ const Journal = () => {
                       transition={{ delay: idx * 0.15 }}
                       className="relative pl-12 pb-8"
                     >
-                      {/* Timeline dot */}
                       <div className="absolute left-2.5 top-1 w-4 h-4 rounded-full bg-emerald-500 border-[3px] border-white shadow-sm z-10" />
 
-                      {/* Timestamp */}
                       {time && (
                         <p className="text-xs font-semibold text-emerald-600 mb-1">{time}</p>
                       )}
 
-                      {/* Checkpoint name */}
                       <h3 className="font-display font-bold text-foreground text-base mb-1">
                         Arrived at {cp.name}
                       </h3>
 
-                      {/* Description */}
                       {cp.description && (
                         <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
                           {cp.description}
                         </p>
                       )}
 
-                      {/* Photos */}
                       {cpPhotos.length > 0 && (
                         <div className={`mt-2 ${cpPhotos.length === 1 ? "" : "grid grid-cols-2 gap-2"}`}>
                           {cpPhotos.map((photo: any, pIdx: number) => {
@@ -264,7 +302,6 @@ const Journal = () => {
                   );
                 })}
 
-                {/* Trip end marker */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -301,7 +338,7 @@ const Journal = () => {
     );
   }
 
-  // Trip list view
+  // ── Trip list view ───────────────────────────────────────────
   return (
     <div className="min-h-screen bg-background pb-20">
       <header className="safe-top px-4 py-6">
@@ -322,10 +359,9 @@ const Journal = () => {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: idx * 0.08 }}
-                onClick={() => setSelectedTrip(trip)}
+                onClick={() => handleSelectTrip(trip)}
                 className="bg-card rounded-2xl overflow-hidden shadow-soft cursor-pointer active:scale-[0.98] transition-transform border border-border/50"
               >
-                {/* Trip cover image or gradient */}
                 {firstPhoto ? (
                   <div className="relative h-36">
                     <img
@@ -363,7 +399,6 @@ const Journal = () => {
                   </div>
                 )}
 
-                {/* Trip info */}
                 <div className="p-3">
                   <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
                     <span className="flex items-center gap-1">
@@ -384,7 +419,6 @@ const Journal = () => {
                     </span>
                   </div>
 
-                  {/* Checkpoint pills */}
                   {checkpoints.length > 0 && (
                     <div className="flex gap-1.5 flex-wrap">
                       {checkpoints.map((cp: any, i: number) => (

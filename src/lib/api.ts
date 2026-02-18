@@ -1,14 +1,17 @@
-import { supabase, Trip, Photo } from './supabase';
+import { supabase, Trip, Photo, TripCheckpointMeta } from './supabase';
 
-// Trip API
-export const createTrip = async (trip: Omit<Trip, 'id' | 'created_at'>) => {
+// ── Trip API ──────────────────────────────────────────────────
+
+export const createTrip = async (
+  trip: Omit<Trip, 'id' | 'created_at'>
+) => {
   const { data, error } = await supabase
     .from('trips')
     .insert([trip])
     .select()
     .single();
   if (error) throw error;
-  return data;
+  return data as Trip;
 };
 
 export const getTrips = async (userId: string) => {
@@ -31,20 +34,27 @@ export const getTripById = async (tripId: string) => {
   return data as Trip;
 };
 
-// Photo API
-export const uploadPhoto = async (
+// ── Photo API ─────────────────────────────────────────────────
+
+/**
+ * Upload a photo file to Supabase Storage and insert a record in the photos table.
+ */
+export const uploadTripPhoto = async (
   userId: string,
   tripId: string,
+  checkpointId: string,
   file: File,
-  latitude: number,
-  longitude: number
+  caption: string | undefined,
+  lat: number,
+  lng: number
 ) => {
-  const fileName = `${userId}/${tripId}/${Date.now()}-${file.name}`;
-  
+  const ext = file.name.split('.').pop() || 'jpg';
+  const fileName = `${userId}/${tripId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
   const { error: uploadError } = await supabase.storage
     .from('photos')
-    .upload(fileName, file);
-  
+    .upload(fileName, file, { contentType: file.type });
+
   if (uploadError) throw uploadError;
 
   const { data: photoData, error: photoError } = await supabase
@@ -52,27 +62,44 @@ export const uploadPhoto = async (
     .insert([{
       user_id: userId,
       trip_id: tripId,
+      checkpoint_id: checkpointId,
       storage_path: fileName,
-      latitude,
-      longitude,
+      latitude: lat,
+      longitude: lng,
+      caption: caption || null,
       taken_at: new Date().toISOString(),
     }])
     .select()
     .single();
 
   if (photoError) throw photoError;
-  return photoData;
+  return photoData as Photo;
 };
 
-export const getPhotos = async (tripId: string) => {
+/** Returns all photos for a trip ordered by taken_at. */
+export const getTripPhotosList = async (tripId: string) => {
   const { data, error } = await supabase
     .from('photos')
     .select('*')
     .eq('trip_id', tripId)
-    .order('taken_at', { ascending: false });
+    .order('taken_at', { ascending: true });
   if (error) throw error;
   return data as Photo[];
 };
+
+/** @deprecated use uploadTripPhoto + getTripPhotosList */
+export const uploadPhoto = async (
+  userId: string,
+  tripId: string,
+  file: File,
+  latitude: number,
+  longitude: number
+) => {
+  return uploadTripPhoto(userId, tripId, '', file, undefined, latitude, longitude);
+};
+
+/** @deprecated use getTripPhotosList */
+export const getPhotos = async (tripId: string) => getTripPhotosList(tripId);
 
 export const updatePhotoCaption = async (photoId: string, caption: string, emoji?: string) => {
   const { data, error } = await supabase
@@ -85,32 +112,41 @@ export const updatePhotoCaption = async (photoId: string, caption: string, emoji
   return data;
 };
 
-export const getPhotoUrl = async (storagePath: string) => {
-  const { data } = supabase.storage
-    .from('photos')
-    .getPublicUrl(storagePath);
+/** Get the public URL for a file stored in the photos bucket. */
+export const getPhotoPublicUrl = (storagePath: string): string => {
+  const { data } = supabase.storage.from('photos').getPublicUrl(storagePath);
   return data.publicUrl;
 };
 
-// Privacy Settings API
+/** @deprecated use getPhotoPublicUrl */
+export const getPhotoUrl = async (storagePath: string) => getPhotoPublicUrl(storagePath);
+
+// ── Privacy Settings API ──────────────────────────────────────
+
 export const getPrivacySettings = async (userId: string) => {
   const { data, error } = await supabase
     .from('privacy_settings')
     .select('*')
     .eq('user_id', userId)
     .single();
-  
+
   if (error && error.code !== 'PGRST116') throw error;
-  
+
   return data || {
     user_id: userId,
+    gps_tracking_enabled: true,
+    photo_geotagging_enabled: true,
     allow_anonymous_sharing: false,
     allow_research_data: false,
-    gps_tracking_enabled: true,
   };
 };
 
-export const updatePrivacySettings = async (userId: string, settings: any) => {
+export const updatePrivacySettings = async (userId: string, settings: Partial<{
+  gps_tracking_enabled: boolean;
+  photo_geotagging_enabled: boolean;
+  allow_anonymous_sharing: boolean;
+  allow_research_data: boolean;
+}>) => {
   const { data, error } = await supabase
     .from('privacy_settings')
     .upsert({
@@ -120,7 +156,7 @@ export const updatePrivacySettings = async (userId: string, settings: any) => {
     })
     .select()
     .single();
-  
+
   if (error) throw error;
   return data;
 };

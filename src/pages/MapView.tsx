@@ -9,6 +9,7 @@ import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, Chev
 import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { saveLocalTrip } from "@/lib/localTrips";
+import { createTrip, uploadTripPhoto } from "@/lib/api";
 import L from "leaflet";
 import { MapContainer, TileLayer, Polyline, Marker, Popup, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
@@ -87,6 +88,12 @@ const MapView = () => {
   const watchIdRef = useRef<number | null>(null);
   const isTrackingRef = useRef(false);
 
+  /**
+   * Maps photo ID → original File so we can upload to Supabase when the trip ends.
+   * Cleared after each trip save.
+   */
+  const photoFilesRef = useRef<Map<string, File>>(new Map());
+
   // Keep ref in sync so the GPS callback can read it
   isTrackingRef.current = isTracking;
 
@@ -114,7 +121,6 @@ const MapView = () => {
     onCheckpointReached,
   });
 
-  // Only close dialog — do NOT auto-resume simulation. User must click "Resume Trip".
   const handleCheckpointDialogChange = (open: boolean) => {
     setCheckpointDialogOpen(open);
   };
@@ -130,7 +136,7 @@ const MapView = () => {
     }
   }, [user, loading, navigate]);
 
-  // Single GPS watcher — updates blue dot AND feeds trip data when tracking
+  // Single GPS watcher
   useEffect(() => {
     if (simState.isSimulating) return;
     if (!navigator.geolocation) return;
@@ -152,7 +158,6 @@ const MapView = () => {
         const loc: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setCurrentLocation(loc);
 
-        // Feed location to trip detector when actively tracking
         if (isTrackingRef.current) {
           addLocation({
             latitude: pos.coords.latitude,
@@ -172,20 +177,108 @@ const MapView = () => {
     };
   }, [simState.isSimulating, addLocation]);
 
+  // ── Trip save: local first, then Supabase ──────────────────
+
+  const saveTripData = async (data: typeof tripData) => {
+    if (data.locations.length === 0) return;
+
+    const origin = data.checkpoints[0]?.name || "Start";
+    const destination = data.checkpoints[data.checkpoints.length - 1]?.name || origin;
+    const routeCoords: Array<[number, number]> = data.locations.map(l => [l.latitude, l.longitude]);
+    const now = new Date().toISOString();
+    const durationMinutes = Math.round((Date.now() - data.startTime) / 60000);
+    const distanceKm = data.distance / 1000;
+
+    const checkpointsMeta = data.checkpoints.map(cp => ({
+      id: cp.id,
+      name: cp.name,
+      lat: cp.lat,
+      lng: cp.lng,
+      timestamp: cp.timestamp,
+      description: cp.description,
+    }));
+
+    // Try Supabase first to get a canonical ID for deduplication
+    let tripId = crypto.randomUUID();
+    let savedToSupabase = false;
+
+    if (user) {
+      try {
+        const trip = await createTrip({
+          user_id: user.id,
+          origin,
+          destination,
+          start_time: new Date(data.startTime).toISOString(),
+          end_time: now,
+          distance_km: distanceKm,
+          duration_minutes: durationMinutes,
+          route_coordinates: routeCoords,
+          checkpoints: checkpointsMeta,
+        });
+        tripId = trip.id;
+        savedToSupabase = true;
+
+        // Upload each photo that has a corresponding File
+        for (const cp of data.checkpoints) {
+          for (const photo of cp.photos) {
+            const file = photoFilesRef.current.get(photo.id);
+            if (file) {
+              try {
+                await uploadTripPhoto(
+                  user.id,
+                  tripId,
+                  cp.id,
+                  file,
+                  photo.caption,
+                  cp.lat,
+                  cp.lng
+                );
+              } catch (err) {
+                console.error("Photo upload failed:", err);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Supabase trip save failed, falling back to local:", err);
+      }
+    }
+
+    // Always save locally (offline backup). Use the same ID so Journal
+    // deduplication prevents showing the trip twice.
+    saveLocalTrip({
+      id: tripId,
+      user_id: user?.id || "local",
+      origin,
+      destination,
+      start_time: new Date(data.startTime).toISOString(),
+      end_time: now,
+      distance_km: distanceKm,
+      duration_minutes: durationMinutes,
+      route_coordinates: routeCoords,
+      checkpoints: data.checkpoints,
+    });
+
+    photoFilesRef.current.clear();
+
+    toast({
+      title: savedToSupabase ? "Trip saved to your diary!" : "Trip saved locally!",
+      description: savedToSupabase
+        ? "Your journey and photos are in the cloud."
+        : "Will sync when connection is available.",
+    });
+  };
+
   // Real GPS trip: Start / End
   const handleToggleTracking = () => {
     if (isTracking) {
-      // End trip
       const finalData = endTrip();
-      saveTripLocally(finalData);
+      saveTripData(finalData);
       setIsTracking(false);
-      toast({ title: "Trip ended!", description: "Your journey has been saved to your diary." });
     } else {
-      // Start trip
       startTrip();
       setIsTracking(true);
 
-      // Add current location as first point
       if (currentLocation) {
         addLocation({
           latitude: currentLocation[0],
@@ -196,23 +289,6 @@ const MapView = () => {
 
       toast({ title: "Trip started!", description: "Walk around — your route is being tracked." });
     }
-  };
-
-  const saveTripLocally = (data: typeof tripData) => {
-    if (data.locations.length === 0) return;
-    const origin = data.checkpoints[0]?.name || "Start";
-    const destination = data.checkpoints[data.checkpoints.length - 1]?.name || origin;
-    saveLocalTrip({
-      user_id: user?.id || "dev-mock-user-001",
-      origin,
-      destination,
-      start_time: new Date(data.startTime).toISOString(),
-      end_time: new Date().toISOString(),
-      distance_km: data.distance / 1000,
-      duration_minutes: Math.round((Date.now() - data.startTime) / 60000),
-      route_coordinates: data.locations.map(l => [l.latitude, l.longitude] as [number, number]),
-      checkpoints: data.checkpoints,
-    });
   };
 
   // Simulation handlers
@@ -233,11 +309,11 @@ const MapView = () => {
   const handleStopSimulation = () => {
     stopSimulation();
     const finalData = endTrip();
-    saveTripLocally(finalData);
+    saveTripData(finalData);
     setIsTracking(false);
   };
 
-  // Checkpoint: add at current GPS location
+  // Add a checkpoint at current GPS location
   const handleAddCheckpoint = () => {
     if (!currentLocation) {
       toast({ title: "No location", description: "Waiting for GPS signal..." });
@@ -256,9 +332,10 @@ const MapView = () => {
     setCheckpointDialogOpen(true);
   };
 
-  const handleAddPhotoToCheckpoint = (photo: CheckpointPhoto) => {
+  const handleAddPhotoToCheckpoint = (photo: CheckpointPhoto, file: File) => {
     if (!activeCheckpointId) return;
     addPhotoToCheckpoint(activeCheckpointId, photo);
+    photoFilesRef.current.set(photo.id, file);
   };
 
   const handleCheckpointNameUpdate = (name: string) => {
@@ -289,7 +366,6 @@ const MapView = () => {
 
   const activeCheckpoint = tripData.checkpoints.find(cp => cp.id === activeCheckpointId) || null;
 
-  // Upcoming sim checkpoints (not yet reached) — show grayed markers
   const upcomingCheckpoints = simState.isSimulating
     ? customCheckpoints.filter(sc => !simState.reachedCheckpoints.includes(sc.name))
     : [];
@@ -303,7 +379,6 @@ const MapView = () => {
         />
         <MapController currentLocation={currentLocation} shouldCenter={shouldCenter} />
 
-        {/* Route polyline — shadow + main line for depth */}
         {polyPositions.length > 1 && (
           <>
             <Polyline positions={polyPositions} pathOptions={{ color: "#16a34a", weight: 7, opacity: 0.2, lineCap: "round", lineJoin: "round" }} />
@@ -311,12 +386,10 @@ const MapView = () => {
           </>
         )}
 
-        {/* Current location */}
         {currentLocation && (
           <Marker position={currentLocation} icon={currentLocationIcon} />
         )}
 
-        {/* Reached checkpoint markers */}
         {tripData.checkpoints.map((cp) => (
           <Marker
             key={cp.id}
@@ -337,7 +410,6 @@ const MapView = () => {
           </Marker>
         ))}
 
-        {/* Upcoming checkpoint markers (grayed, simulation only) */}
         {upcomingCheckpoints.map((sc) => (
           <Marker
             key={sc.name}
@@ -352,7 +424,6 @@ const MapView = () => {
           </Marker>
         ))}
 
-        {/* Checkpoint photo markers */}
         {tripData.checkpoints.flatMap((cp) =>
           cp.photos.map((photo, i) => (
             <Marker
@@ -421,7 +492,6 @@ const MapView = () => {
           <div className="mt-2 bg-white/95 backdrop-blur-xl rounded-2xl p-3 shadow-lg w-64 border border-white/50">
             <p className="text-xs font-bold text-amber-800 mb-2">Trip Simulator (Demo)</p>
 
-            {/* Checkpoint list */}
             {!simState.isSimulating && (
               <div className="mb-3">
                 <p className="text-[10px] text-muted-foreground mb-1 font-medium uppercase tracking-wide">Stops</p>
@@ -445,7 +515,6 @@ const MapView = () => {
                   ))}
                 </div>
 
-                {/* Add checkpoint */}
                 <div className="relative">
                   <button
                     onClick={() => setShowPresetPicker(!showPresetPicker)}
@@ -479,7 +548,6 @@ const MapView = () => {
               </div>
             )}
 
-            {/* Speed selector */}
             <div className="flex gap-1 mb-3">
               {[1, 2, 5, 10].map((s) => (
                 <button
@@ -496,7 +564,6 @@ const MapView = () => {
               ))}
             </div>
 
-            {/* Progress bar */}
             {simState.isSimulating && (
               <div className="mb-3">
                 <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
@@ -521,7 +588,6 @@ const MapView = () => {
               </div>
             )}
 
-            {/* Controls */}
             <div className="flex gap-1.5">
               {!simState.isSimulating ? (
                 <Button
@@ -566,7 +632,6 @@ const MapView = () => {
 
       {/* Bottom Controls */}
       <div className="absolute bottom-0 left-0 right-0 px-4 pb-6 pt-3 z-[1000]" style={{ background: "linear-gradient(to top, rgba(255,255,255,0.95) 60%, transparent)" }}>
-        {/* Stats bar */}
         {isTracking && (
           <div className="bg-white/80 backdrop-blur-xl rounded-2xl p-3 mb-3 shadow-sm border border-white/50">
             <div className="grid grid-cols-3 divide-x divide-gray-200">
@@ -586,7 +651,6 @@ const MapView = () => {
           </div>
         )}
 
-        {/* Action buttons */}
         <div className="flex gap-2.5">
           {isTracking && !simState.isSimulating && (
             <Button

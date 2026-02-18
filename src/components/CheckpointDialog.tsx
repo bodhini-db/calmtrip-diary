@@ -10,7 +10,8 @@ interface CheckpointDialogProps {
   checkpoint: Checkpoint | null;
   isSimPaused?: boolean;
   onUpdateName: (name: string) => void;
-  onAddPhoto: (photo: CheckpointPhoto) => void;
+  /** Called once per selected file. `file` is the raw File for Supabase upload. */
+  onAddPhoto: (photo: CheckpointPhoto, file: File) => void;
   onResume: () => void;
 }
 
@@ -44,10 +45,10 @@ export function CheckpointDialog({
       const photo: CheckpointPhoto = {
         id: crypto.randomUUID(),
         objectUrl,
-        caption: caption || file.name,
+        caption: caption || undefined,
         timestamp: Date.now(),
       };
-      onAddPhoto(photo);
+      onAddPhoto(photo, file);
     }
 
     setCaption("");
