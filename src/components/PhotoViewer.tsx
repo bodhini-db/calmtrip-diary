@@ -25,7 +25,7 @@ export const PhotoViewer = ({
   const [emoji, setEmoji] = useState(photos[currentIndex]?.emoji || "");
   const imgRef = useRef<HTMLImageElement>(null);
 
-  const currentPhoto = photos[currentIndex];
+  const currentPhoto = photos[Math.min(currentIndex, photos.length - 1)] ?? photos[0];
 
   useEffect(() => {
     setCaption(currentPhoto?.caption || "");
@@ -54,15 +54,20 @@ export const PhotoViewer = ({
 
   const emojiOptions = ["😍", "🥰", "😎", "🤩", "😋", "😌", "🥳", "😊", "🌟", "✨", "💚", "🗺️"];
 
+  // Don't render a broken full-screen overlay if no photo
+  if (!currentPhoto || photos.length === 0) {
+    return null;
+  }
+
   return (
     <motion.div
-      className="fixed inset-0 bg-black/95 z-50 flex flex-col"
+      className="fixed inset-0 bg-black z-[100] flex flex-col min-h-screen"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
       {/* Header */}
-      <div className="px-4 py-3 flex items-center justify-between bg-black/50 backdrop-blur">
+      <div className="px-4 py-3 flex items-center justify-between bg-black/80 backdrop-blur shrink-0">
         <Button
           variant="ghost"
           size="icon"
@@ -90,7 +95,7 @@ export const PhotoViewer = ({
       </div>
 
       {/* Image Display */}
-      <div className="flex-1 flex items-center justify-center overflow-hidden relative">
+      <div className="flex-1 flex items-center justify-center overflow-hidden relative min-h-0">
         <motion.img
           key={currentPhoto.id}
           src={currentPhoto.url}
@@ -134,7 +139,7 @@ export const PhotoViewer = ({
       </div>
 
       {/* Bottom Controls */}
-      <div className="px-4 py-4 space-y-4 bg-black/50 backdrop-blur">
+      <div className="px-4 py-4 space-y-4 bg-black/80 backdrop-blur shrink-0">
         {/* Caption Display/Edit */}
         {!isEditing ? (
           <motion.div

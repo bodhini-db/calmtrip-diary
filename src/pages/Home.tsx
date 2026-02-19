@@ -6,17 +6,23 @@ import { FloatingCard } from "@/components/ui/floating-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
-import { getLocalTrips, LocalTrip } from "@/lib/localTrips";
-import { getTrips } from "@/lib/api";
+import { getTrips, getTripPhotosList, getPhotoPublicUrl, getProfileFromUser } from "@/lib/api";
+import { Trip } from "@/lib/supabase";
 import { formatDistance } from "@/lib/insights";
 import { AiTripPlanner } from "@/components/AiTripPlanner";
+import { ProfileDialog } from "@/components/ProfileDialog";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import mapPreview from "@/assets/map-preview.jpg";
 
 export default function Home() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
-  const [trips, setTrips] = useState<LocalTrip[]>([]);
-  const [userName, setUserName] = useState("Traveler");
+  const [trips, setTrips] = useState<Trip[]>([]);
+  const [showProfileDialog, setShowProfileDialog] = useState(false);
+
+  const profile = user ? getProfileFromUser(user) : null;
+  const displayName = profile?.full_name || user?.email?.split("@")[0] || "Traveler";
+  const avatarUrl = profile?.avatar_url;
 
   useEffect(() => {
     if (!user && !loading) {
@@ -25,20 +31,41 @@ export default function Home() {
     }
 
     if (user) {
-      const email = user.email?.split("@")[0] || "Traveler";
-      setUserName(email.charAt(0).toUpperCase() + email.slice(1));
-      // Merge Supabase + local trips
-      const localTrips = getLocalTrips(user.id);
-      setTrips(localTrips);
-      getTrips(user.id).then(remote => {
-        setTrips(prev => {
-          const merged = [...remote as any[]];
-          for (const lt of prev) {
-            if (!merged.some(t => t.id === lt.id)) merged.push(lt);
-          }
-          return merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        });
-      }).catch(() => {});
+      // Load trips from Supabase and preload cover photos
+      const loadTrips = async () => {
+        try {
+          const remote = await getTrips(user.id);
+
+          // Preload first photo for each trip to show as cover
+          const tripsWithCovers = await Promise.all(
+            (remote as any[]).map(async (trip) => {
+              try {
+                const photos = await getTripPhotosList(trip.id);
+                const firstPhoto = photos[0];
+                if (firstPhoto) {
+                  return {
+                    ...trip,
+                    coverUrl: getPhotoPublicUrl(firstPhoto.storage_path),
+                  };
+                }
+                return trip;
+              } catch {
+                return trip; // fallback: no cover photo
+              }
+            })
+          );
+
+          const sorted = tripsWithCovers.sort(
+            (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          );
+          setTrips(sorted as any);
+        } catch (error) {
+          console.error("Failed to load trips:", error);
+          setTrips([]);
+        }
+      };
+
+      loadTrips();
     }
   }, [user, loading, navigate]);
 
@@ -56,7 +83,7 @@ export default function Home() {
   const recentTrips = trips.slice(0, 3);
   const totalDistance = trips.reduce((sum, t) => sum + (t.distance_km || 0), 0);
   const totalPhotos = trips.reduce(
-    (sum, t) => sum + t.checkpoints.reduce((s, cp) => s + (cp.photos?.length ?? 0), 0),
+    (sum, t) => sum + ((t as any).checkpoints || []).reduce((s: number, cp: any) => s + (cp.photos?.length ?? 0), 0),
     0
   );
 
@@ -64,15 +91,24 @@ export default function Home() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="safe-top px-4 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-forest to-sage flex items-center justify-center text-white font-bold">
-            {userName.charAt(0).toUpperCase()}
-          </div>
+        <button
+          type="button"
+          onClick={() => setShowProfileDialog(true)}
+          className="flex items-center gap-3 text-left"
+        >
+          <Avatar className="h-10 w-10 border-2 border-emerald-100">
+            {avatarUrl ? (
+              <AvatarImage src={avatarUrl} alt="Profile" />
+            ) : null}
+            <AvatarFallback className="bg-gradient-to-br from-forest to-sage text-white font-bold">
+              {displayName.charAt(0).toUpperCase()}
+            </AvatarFallback>
+          </Avatar>
           <div>
             <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Welcome back</p>
-            <h1 className="font-display font-bold text-foreground">Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {userName}</h1>
+            <h1 className="font-display font-bold text-foreground">Good {new Date().getHours() < 12 ? "morning" : "afternoon"}, {displayName}</h1>
           </div>
-        </div>
+        </button>
         <div className="flex gap-2">
           <Button variant="icon" size="icon">
             <Bell className="w-5 h-5" />
@@ -82,6 +118,15 @@ export default function Home() {
           </Button>
         </div>
       </header>
+
+      {user && (
+        <ProfileDialog
+          open={showProfileDialog}
+          onOpenChange={setShowProfileDialog}
+          user={user}
+          onProfileUpdated={() => {}}
+        />
+      )}
 
       {/* Main Content */}
       <main className="px-4 space-y-6 pb-8">
@@ -175,9 +220,9 @@ export default function Home() {
                   onClick={() => navigate("/journal")}
                 >
                   <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-emerald-100 to-blue-100 flex items-center justify-center text-xl shrink-0">
-                    {trip.checkpoints[0]?.photos?.[0] ? (
+                    {(trip as any).coverUrl ? (
                       <img
-                        src={trip.checkpoints[0].photos[0].objectUrl}
+                        src={(trip as any).coverUrl}
                         className="w-full h-full object-cover rounded-lg"
                         alt=""
                       />

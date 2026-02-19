@@ -18,7 +18,6 @@ import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { getTrips, getPhotos, getPrivacySettings, updatePrivacySettings } from "@/lib/api";
 import { calculateInsights, formatDistance } from "@/lib/insights";
-import { getLocalTrips } from "@/lib/localTrips";
 
 const Stats = () => {
   const { user, loading } = useAuth();
@@ -43,26 +42,11 @@ const Stats = () => {
   const loadData = async () => {
     if (!user) return;
     try {
-      let allTrips: any[] = [];
-      try {
-        const supabaseTrips = await getTrips(user.id);
-        allTrips = supabaseTrips;
-      } catch {
-        // Supabase unavailable
-      }
-
-      // Merge local trips
-      const localTrips = getLocalTrips(user.id);
-      for (const lt of localTrips) {
-        if (!allTrips.some((t: any) => t.id === lt.id)) {
-          allTrips.push(lt);
-        }
-      }
-
+      const allTrips = await getTrips(user.id);
       setTrips(allTrips);
 
       const allPhotos = await Promise.all(
-        allTrips.filter((t: any) => !t._local).map((trip: any) => getPhotos(trip.id))
+        allTrips.map((trip: any) => getPhotos(trip.id))
       ).then(results => results.flat()).catch(() => []);
 
       const newInsights = calculateInsights(allTrips, allPhotos);
@@ -73,6 +57,8 @@ const Stats = () => {
       setShareData(settings?.allow_anonymous_sharing || false);
     } catch (error) {
       console.error("Error loading stats:", error);
+      setTrips([]);
+      setInsights(null);
     }
   };
 

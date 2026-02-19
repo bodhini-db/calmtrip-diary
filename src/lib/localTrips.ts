@@ -72,3 +72,21 @@ export function getLocalTripPhotos(tripId: string): Checkpoint['photos'] {
     return [];
   }
 }
+
+/**
+ * Delete a trip from local storage.
+ */
+export function deleteLocalTrip(tripId: string): boolean {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const all: LocalTrip[] = JSON.parse(raw);
+    const filtered = all.filter(t => t.id !== tripId);
+    if (filtered.length === all.length) return false; // Trip not found
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    return true;
+  } catch (err) {
+    console.error('Failed to delete trip locally:', err);
+    return false;
+  }
+}

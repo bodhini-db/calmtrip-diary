@@ -4,12 +4,21 @@ import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { FloatingCard } from "@/components/ui/floating-card";
-import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera } from "lucide-react";
+import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { getTrips, getTripPhotosList, getPhotoPublicUrl } from "@/lib/api";
+import { getTrips, getTripPhotosList, getPhotoPublicUrl, deleteTrip } from "@/lib/api";
 import { AiJournalWriter } from "@/components/AiJournalWriter";
-import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
 
 const Journal = () => {
   const { user, loading } = useAuth();
@@ -20,6 +29,7 @@ const Journal = () => {
   const [viewerPhotos, setViewerPhotos] = useState<any[]>([]);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showViewer, setShowViewer] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   useEffect(() => {
     if (!user && !loading) {
@@ -29,40 +39,74 @@ const Journal = () => {
     if (user) loadTrips();
   }, [user, loading, navigate]);
 
+  // Handle browser/hardware back: close viewer first, then trip detail, then allow leaving /journal
+  useEffect(() => {
+    const handlePop = () => {
+      if (showViewer) setShowViewer(false);
+      else if (selectedTrip) setSelectedTrip(null);
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, [showViewer, selectedTrip]);
+
   const loadTrips = async () => {
     if (!user) return;
 
-    let supabaseTrips: any[] = [];
     try {
       const raw = await getTrips(user.id);
-      // Mark as Supabase trips; photos loaded on demand
-      supabaseTrips = raw.map(t => ({
+
+      // Base trips with empty photos
+      const baseTrips = raw.map(t => ({
         ...t,
-        _local: false,
         _checkpoints: (t.checkpoints || []).map((cp: any) => ({
           ...cp,
-          photos: [], // populated lazily when trip is opened
+          photos: [],
         })),
         _photosLoaded: false,
       }));
-    } catch {
-      // Supabase unavailable — fall back to local only
-    }
 
-    const localTrips = getLocalTrips(user.id).map(lt => ({
-      ...lt,
-      _local: true,
-      _checkpoints: lt.checkpoints,
-      _photosLoaded: true,
-    }));
+      // Preload photos for all trips so cover images show immediately
+      const tripsWithPhotos = await Promise.all(
+        baseTrips.map(async (trip: any) => {
+          try {
+            const photos = await getTripPhotosList(trip.id);
 
-    // Merge: Supabase is source of truth; local fills gaps
-    const merged = [...supabaseTrips];
-    for (const lt of localTrips) {
-      if (!merged.some(t => t.id === lt.id)) merged.push(lt);
+            // Group photos by checkpoint_id
+            const byCheckpoint = new Map<string, any[]>();
+            for (const p of photos) {
+              const key = p.checkpoint_id || '__uncategorized__';
+              if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
+              byCheckpoint.get(key)!.push({
+                id: p.id,
+                objectUrl: getPhotoPublicUrl(p.storage_path),
+                caption: p.caption,
+                timestamp: new Date(p.taken_at || (p as any).created_at || 0).getTime(),
+              });
+            }
+
+            const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
+              ...cp,
+              photos: byCheckpoint.get(cp.id) || [],
+            }));
+
+            return {
+              ...trip,
+              _checkpoints: enrichedCheckpoints,
+              _photosLoaded: true,
+            };
+          } catch {
+            return trip; // fallback: no photos loaded
+          }
+        })
+      );
+
+      tripsWithPhotos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setTrips(tripsWithPhotos);
+    } catch (error) {
+      console.error("Failed to load trips:", error);
+      toast.error("Failed to load trips. Please check your connection.");
+      setTrips([]);
     }
-    merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    setTrips(merged);
   };
 
   /**
@@ -70,7 +114,7 @@ const Journal = () => {
    * convert storage_path → public URL, and reconstruct checkpoint photo arrays.
    */
   const handleSelectTrip = async (trip: any) => {
-    if (!trip._local && !trip._photosLoaded) {
+    if (!trip._photosLoaded) {
       setLoadingPhotos(true);
       try {
         const photos = await getTripPhotosList(trip.id);
@@ -98,13 +142,17 @@ const Journal = () => {
         // Update the list so the thumbnail also refreshes
         setTrips(prev => prev.map(t => t.id === trip.id ? enriched : t));
         setSelectedTrip(enriched);
-      } catch {
+        window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
+      } catch (error) {
+        console.error("Failed to load photos:", error);
         setSelectedTrip(trip);
+        window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
       } finally {
         setLoadingPhotos(false);
       }
     } else {
       setSelectedTrip(trip);
+      window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
     }
   };
 
@@ -155,9 +203,29 @@ const Journal = () => {
 
   const openPhotoViewer = (trip: any, photoIndex: number) => {
     const photos = getTripPhotos(trip);
+    if (photos.length === 0) return;
     setViewerPhotos(photos);
-    setSelectedPhotoIndex(photoIndex);
+    setSelectedPhotoIndex(Math.min(photoIndex, photos.length - 1));
     setShowViewer(true);
+    window.history.pushState({ photoViewer: true }, "", window.location.pathname);
+  };
+
+  const handleDeleteTrip = async (trip: any) => {
+    try {
+      await deleteTrip(trip.id);
+
+      // Remove from state
+      setTrips(prev => prev.filter(t => t.id !== trip.id));
+      
+      // Close trip detail view and dialog
+      setSelectedTrip(null);
+      setShowDeleteDialog(false);
+
+      toast.success("Trip deleted successfully");
+    } catch (error) {
+      console.error("Failed to delete trip:", error);
+      toast.error("Failed to delete trip. Please try again.");
+    }
   };
 
   if (loading) {
@@ -185,9 +253,19 @@ const Journal = () => {
             <h1 className="font-display font-bold text-foreground">
               {selectedTrip.destination || selectedTrip.origin || "Trip"}
             </h1>
-            <Button variant="icon" size="icon" onClick={() => handleShareTrip(selectedTrip)}>
-              <Share2 className="w-5 h-5" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="icon" size="icon" onClick={() => handleShareTrip(selectedTrip)}>
+                <Share2 className="w-5 h-5" />
+              </Button>
+              <Button 
+                variant="icon" 
+                size="icon" 
+                onClick={() => setShowDeleteDialog(true)}
+                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="w-5 h-5" />
+              </Button>
+            </div>
           </div>
 
           <motion.div
@@ -331,13 +409,34 @@ const Journal = () => {
         {/* AI Journal Writer */}
         <AiJournalWriter trip={selectedTrip} />
 
-        {showViewer && (
+        {showViewer && viewerPhotos.length > 0 && (
           <PhotoViewer
             photos={viewerPhotos}
             initialIndex={selectedPhotoIndex}
             onClose={() => setShowViewer(false)}
           />
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this trip?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the trip and all {getTotalPhotos(selectedTrip)} associated photos.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-500 hover:bg-red-600"
+                onClick={() => handleDeleteTrip(selectedTrip)}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     );
   }

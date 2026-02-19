@@ -8,7 +8,6 @@ import { CheckpointDialog } from "@/components/CheckpointDialog";
 import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, ChevronDown, Navigation } from "lucide-react";
 import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
-import { saveLocalTrip } from "@/lib/localTrips";
 import { createTrip, uploadTripPhoto } from "@/lib/api";
 import { AiNearbyPlaces } from "@/components/AiNearbyPlaces";
 import L from "leaflet";
@@ -210,87 +209,77 @@ const MapView = () => {
       description: cp.description,
     }));
 
-    // Try Supabase first to get a canonical ID for deduplication
-    let tripId = crypto.randomUUID();
-    let savedToSupabase = false;
+    if (!user) {
+      toast({
+        title: "Error",
+        description: "You must be logged in to save trips.",
+        variant: "destructive",
+      });
+      return;
+    }
 
-    if (user) {
+    try {
+      const tripPayload: any = {
+        user_id: user.id,
+        origin,
+        destination,
+        start_time: new Date(data.startTime).toISOString(),
+        end_time: now,
+        distance_km: distanceKm,
+        duration_minutes: durationMinutes,
+        route_coordinates: routeCoords,
+        checkpoints: checkpointsMeta,
+      };
+      let trip: any;
       try {
-        const tripPayload: any = {
-          user_id: user.id,
-          origin,
-          destination,
-          start_time: new Date(data.startTime).toISOString(),
-          end_time: now,
-          distance_km: distanceKm,
-          duration_minutes: durationMinutes,
-          route_coordinates: routeCoords,
-          checkpoints: checkpointsMeta,
-        };
-        let trip: any;
-        try {
-          trip = await createTrip(tripPayload);
-        } catch (e: any) {
-          // If checkpoints column doesn't exist yet (migration not run), retry without it
-          if (e?.code === 'PGRST204' || e?.message?.includes('checkpoints')) {
-            const { checkpoints: _dropped, ...withoutCheckpoints } = tripPayload;
-            trip = await createTrip(withoutCheckpoints);
-          } else {
-            throw e;
-          }
+        trip = await createTrip(tripPayload);
+      } catch (e: any) {
+        // If checkpoints column doesn't exist yet (migration not run), retry without it
+        if (e?.code === 'PGRST204' || e?.message?.includes('checkpoints')) {
+          const { checkpoints: _dropped, ...withoutCheckpoints } = tripPayload;
+          trip = await createTrip(withoutCheckpoints);
+        } else {
+          throw e;
         }
-        tripId = trip.id;
-        savedToSupabase = true;
+      }
+      const tripId = trip.id;
 
-        // Upload each photo that has a corresponding File
-        for (const cp of data.checkpoints) {
-          for (const photo of cp.photos) {
-            const file = photoFilesRef.current.get(photo.id);
-            if (file) {
-              try {
-                await uploadTripPhoto(
-                  user.id,
-                  tripId,
-                  cp.id,
-                  file,
-                  photo.caption,
-                  cp.lat,
-                  cp.lng
-                );
-              } catch (err) {
-                console.error("Photo upload failed:", err);
-              }
+      // Upload each photo that has a corresponding File
+      for (const cp of data.checkpoints) {
+        for (const photo of cp.photos) {
+          const file = photoFilesRef.current.get(photo.id);
+          if (file) {
+            try {
+              await uploadTripPhoto(
+                user.id,
+                tripId,
+                cp.id,
+                file,
+                photo.caption,
+                cp.lat,
+                cp.lng
+              );
+            } catch (err) {
+              console.error("Photo upload failed:", err);
             }
           }
         }
-      } catch (err) {
-        console.error("Supabase trip save failed, falling back to local:", err);
       }
+
+      photoFilesRef.current.clear();
+
+      toast({
+        title: "Trip saved",
+        description: "Saved to your diary.",
+      });
+    } catch (err) {
+      console.error("Failed to save trip:", err);
+      toast({
+        title: "Failed to save trip",
+        description: "Please check your connection and try again.",
+        variant: "destructive",
+      });
     }
-
-    // Always save locally (offline backup). Use the same ID so Journal
-    // deduplication prevents showing the trip twice.
-    saveLocalTrip({
-      id: tripId,
-      user_id: user?.id || "local",
-      origin,
-      destination,
-      start_time: new Date(data.startTime).toISOString(),
-      end_time: now,
-      distance_km: distanceKm,
-      duration_minutes: durationMinutes,
-      route_coordinates: routeCoords,
-      checkpoints: data.checkpoints,
-    });
-
-    photoFilesRef.current.clear();
-
-    toast({
-      title: "Trip saved",
-      description: savedToSupabase
-        ? "Saved to your diary."
-        : "Saved locally — will sync when online.",
-    });
   };
 
   // Real GPS trip: Start / End
