@@ -138,13 +138,13 @@ export function CheckpointDialog({
         </div>
 
         {/* Photo gallery */}
-        {checkpoint.photos.length > 0 ? (
+        {(checkpoint.photos?.length ?? 0) > 0 ? (
           <div>
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
-              Photos ({checkpoint.photos.length})
+              Photos ({checkpoint.photos?.length ?? 0})
             </label>
             <div className="grid grid-cols-3 gap-2">
-              {checkpoint.photos.map((photo) => (
+              {(checkpoint.photos ?? []).map((photo) => (
                 <div key={photo.id} className="relative group">
                   <div className="aspect-square rounded-xl overflow-hidden border-2 border-white shadow-sm">
                     <img

@@ -84,7 +84,7 @@ const Journal = () => {
             id: p.id,
             objectUrl: getPhotoPublicUrl(p.storage_path),
             caption: p.caption,
-            timestamp: new Date(p.taken_at).getTime(),
+            timestamp: new Date(p.taken_at || (p as any).created_at || 0).getTime(),
           });
         }
 

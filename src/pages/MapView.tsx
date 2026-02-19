@@ -286,10 +286,10 @@ const MapView = () => {
     photoFilesRef.current.clear();
 
     toast({
-      title: savedToSupabase ? "Trip saved to your diary!" : "Trip saved locally!",
+      title: "Trip saved",
       description: savedToSupabase
-        ? "Your journey and photos are in the cloud."
-        : "Will sync when connection is available.",
+        ? "Saved to your diary."
+        : "Saved locally — will sync when online.",
     });
   };
 
@@ -369,7 +369,7 @@ const MapView = () => {
   };
 
   const polyPositions: [number, number][] = tripData.locations.map((l) => [l.latitude, l.longitude]);
-  const totalPhotos = tripData.checkpoints.reduce((sum, cp) => sum + cp.photos.length, 0);
+  const totalPhotos = tripData.checkpoints.reduce((sum, cp) => sum + (cp.photos?.length ?? 0), 0);
 
   if (loading || (!currentLocation && !locationError && polyPositions.length === 0)) {
     return (
@@ -430,7 +430,7 @@ const MapView = () => {
             <Popup>
               <div className="text-sm font-semibold">{cp.name}</div>
               {cp.description && <div className="text-xs text-gray-500">{cp.description}</div>}
-              <div className="text-xs">{cp.photos.length} photos</div>
+              <div className="text-xs">{cp.photos?.length ?? 0} photos</div>
             </Popup>
           </Marker>
         ))}
@@ -450,7 +450,7 @@ const MapView = () => {
         ))}
 
         {tripData.checkpoints.flatMap((cp) =>
-          cp.photos.map((photo, i) => (
+          (cp.photos ?? []).map((photo, i) => (
             <Marker
               key={photo.id}
               position={[cp.lat + i * 0.0001, cp.lng + i * 0.0001]}

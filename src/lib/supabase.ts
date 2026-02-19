@@ -73,8 +73,8 @@ export interface Photo {
   longitude?: number;
   caption?: string;
   emoji_mood?: string;
-  taken_at: string;
-  created_at: string;
+  taken_at?: string;
+  created_at?: string;
 }
 
 export interface CheckpointPhoto {

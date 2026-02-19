@@ -57,15 +57,17 @@ export const uploadTripPhoto = async (
 
   if (uploadError) throw uploadError;
 
+  // photos table columns: id, user_id, trip_id, storage_path, latitude (NOT NULL), longitude (NOT NULL)
+  // Optional columns: checkpoint_id, caption, taken_at, emoji_mood
   const { data: photoData, error: photoError } = await supabase
     .from('photos')
     .insert([{
       user_id: userId,
       trip_id: tripId,
-      checkpoint_id: checkpointId,
       storage_path: fileName,
       latitude: lat,
       longitude: lng,
+      checkpoint_id: checkpointId || null,
       caption: caption || null,
       taken_at: new Date().toISOString(),
     }])
@@ -76,13 +78,13 @@ export const uploadTripPhoto = async (
   return photoData as Photo;
 };
 
-/** Returns all photos for a trip ordered by taken_at. */
+/** Returns all photos for a trip (ordered by id; add taken_at column in DB for time order). */
 export const getTripPhotosList = async (tripId: string) => {
   const { data, error } = await supabase
     .from('photos')
     .select('*')
     .eq('trip_id', tripId)
-    .order('taken_at', { ascending: true });
+    .order('id', { ascending: true });
   if (error) throw error;
   return data as Photo[];
 };
