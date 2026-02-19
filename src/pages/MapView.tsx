@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckpointDialog } from "@/components/CheckpointDialog";
 import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, ChevronDown, Navigation } from "lucide-react";
 import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
 import { createTrip, uploadTripPhoto } from "@/lib/api";
 import { AiNearbyPlaces } from "@/components/AiNearbyPlaces";
 import L from "leaflet";
@@ -72,7 +72,6 @@ const MapView = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading } = useAuth();
-  const { toast } = useToast();
   const {
     tripData, startTrip, endTrip,
     addLocation, addCheckpoint, addPhotoToCheckpoint, updateCheckpointName,
@@ -99,13 +98,12 @@ const MapView = () => {
   isTrackingRef.current = isTracking;
 
   const onCheckpointReached = useCallback((checkpoint: Checkpoint) => {
-    toast({
-      title: `Reached: ${checkpoint.name}!`,
+    toast.success(`Reached: ${checkpoint.name}!`, {
       description: "Journal time! Add photos to remember this stop.",
     });
     setActiveCheckpointId(checkpoint.id);
     setCheckpointDialogOpen(true);
-  }, [toast]);
+  }, []);
 
   const {
     simState, customCheckpoints, routePoints,
@@ -191,7 +189,10 @@ const MapView = () => {
   // ── Trip save: local first, then Supabase ──────────────────
 
   const saveTripData = async (data: typeof tripData) => {
-    if (data.locations.length === 0) return;
+    if (data.locations.length === 0) {
+      toast("Trip too short", { description: "No route was recorded. Move around to track a trip." });
+      return;
+    }
 
     const origin = data.checkpoints[0]?.name || "Start";
     const destination = data.checkpoints[data.checkpoints.length - 1]?.name || origin;
@@ -210,11 +211,7 @@ const MapView = () => {
     }));
 
     if (!user) {
-      toast({
-        title: "Error",
-        description: "You must be logged in to save trips.",
-        variant: "destructive",
-      });
+      toast.error("You must be logged in to save trips.");
       return;
     }
 
@@ -268,17 +265,10 @@ const MapView = () => {
 
       photoFilesRef.current.clear();
 
-      toast({
-        title: "Trip saved",
-        description: "Saved to your diary.",
-      });
+      toast.success("Trip saved", { description: "Saved to your diary." });
     } catch (err) {
       console.error("Failed to save trip:", err);
-      toast({
-        title: "Failed to save trip",
-        description: "Please check your connection and try again.",
-        variant: "destructive",
-      });
+      toast.error("Failed to save trip", { description: "Please check your connection and try again." });
     }
   };
 
@@ -300,14 +290,14 @@ const MapView = () => {
         });
       }
 
-      toast({ title: "Trip started!", description: "Walk around — your route is being tracked." });
+      toast.success("Trip started!", { description: "Walk around — your route is being tracked." });
     }
   };
 
   // Simulation handlers
   const handleStartSimulation = () => {
     if (customCheckpoints.length < 2) {
-      toast({ title: "Need at least 2 checkpoints", description: "Add more stops to simulate a trip." });
+      toast("Need at least 2 checkpoints", { description: "Add more stops to simulate a trip." });
       return;
     }
     if (watchIdRef.current !== null) {
@@ -329,7 +319,7 @@ const MapView = () => {
   // Add a checkpoint at current GPS location
   const handleAddCheckpoint = () => {
     if (!currentLocation) {
-      toast({ title: "No location", description: "Waiting for GPS signal..." });
+      toast("No location", { description: "Waiting for GPS signal..." });
       return;
     }
     const cp: Checkpoint = {
