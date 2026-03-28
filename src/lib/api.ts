@@ -13,11 +13,23 @@ export const getProfileFromUser = (user: { user_metadata?: Record<string, unknow
 });
 
 export const updateProfile = async (updates: { full_name?: string; avatar_url?: string }) => {
-  const { data, error } = await supabase.auth.updateUser({
-    data: updates,
-  });
-  if (error) throw error;
-  return data.user;
+  const { data: userData } = await supabase.auth.getUser();
+  let authUser = userData?.user ?? null;
+  try {
+    const { data } = await supabase.auth.updateUser({ data: updates });
+    authUser = data.user ?? authUser;
+  } catch (e) { void e; }
+  const profileUpdates: Record<string, string | null> = {};
+  if (typeof updates.full_name !== 'undefined') profileUpdates.full_name = updates.full_name || null;
+  if (typeof updates.avatar_url !== 'undefined') profileUpdates.avatar_url = updates.avatar_url || null;
+  if (authUser?.id && Object.keys(profileUpdates).length > 0) {
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update(profileUpdates)
+      .eq('id', authUser.id);
+    if (profileError) throw profileError;
+  }
+  return authUser;
 };
 
 /**

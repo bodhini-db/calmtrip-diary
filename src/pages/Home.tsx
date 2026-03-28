@@ -14,6 +14,7 @@ import { AiTripPlanner } from "@/components/AiTripPlanner";
 import { ProfileDialog } from "@/components/ProfileDialog";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import mapPreview from "@/assets/map-preview.jpg";
+import { TreeOnlyCard } from "@/components/living-journey/TreeOnlyCard";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -172,6 +173,8 @@ export default function Home() {
               : ""
           }
         />
+
+        <TreeOnlyCard totalKm={totalDistance} />
 
         {/* Stats */}
         {trips.length > 0 && (

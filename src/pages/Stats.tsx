@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { getTrips, getPhotos, getPrivacySettings, updatePrivacySettings } from "@/lib/api";
 import { calculateInsights, formatDistance } from "@/lib/insights";
+import { LivingJourneyCard } from "@/components/living-journey/LivingJourneyCard";
 
 const Stats = () => {
   const { user, loading } = useAuth();
@@ -191,6 +192,12 @@ const Stats = () => {
             </div>
           </motion.div>
         )}
+
+        <LivingJourneyCard
+          journalCount={insights ? insights.tripCount : 0}
+          totalKm={insights ? insights.totalDistanceKm : 0}
+          loading={!insights}
+        />
 
         {/* Quick Stats */}
         {insights && (

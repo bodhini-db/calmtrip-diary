@@ -16,6 +16,7 @@ import { useUserProfile } from "@/hooks/useUserProfile";
 import { AiJournalWriter } from "@/components/AiJournalWriter";
 import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
+import { JournalFox } from "@/components/living-journey/JournalFox";
 
 const Journal = () => {
   const { user, loading } = useAuth();
@@ -336,6 +337,22 @@ const Journal = () => {
           </div>
         )}
 
+        {/* Fox companion card */}
+        <div className="px-4 mb-4">
+          <FloatingCard className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-display font-semibold text-foreground">Fox Companion</p>
+                <p className="text-xs text-muted-foreground">Based on this journey's distance and stops</p>
+              </div>
+              <JournalFox
+                distanceKm={typeof selectedTrip.distance_km === "number" ? selectedTrip.distance_km : 0}
+                stopCount={getTripCheckpoints(selectedTrip).length || 0}
+              />
+            </div>
+          </FloatingCard>
+        </div>
+
         {/* Timeline */}
         <main className="px-4">
           {checkpoints.length > 0 ? (
@@ -586,37 +603,44 @@ const Journal = () => {
                 )}
 
                 <div className="p-3">
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
-                    <span className="flex items-center gap-1">
-                      <Navigation className="w-3 h-3 text-emerald-500" />
-                      {trip.distance_km?.toFixed(1)}km
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-emerald-500" />
-                      {trip.duration_minutes || 0}min
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <MapPin className="w-3 h-3 text-emerald-500" />
-                      {checkpoints.length} stops
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <ImageIcon className="w-3 h-3 text-emerald-500" />
-                      {totalPhotos}
-                    </span>
-                  </div>
-
-                  {checkpoints.length > 0 && (
-                    <div className="flex gap-1.5 flex-wrap">
-                      {checkpoints.map((cp: any, i: number) => (
-                        <span
-                          key={i}
-                          className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium"
-                        >
-                          {cp.name}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                        <span className="flex items-center gap-1">
+                          <Navigation className="w-3 h-3 text-emerald-500" />
+                          {trip.distance_km?.toFixed(1)}km
                         </span>
-                      ))}
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-emerald-500" />
+                          {trip.duration_minutes || 0}min
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-emerald-500" />
+                          {checkpoints.length} stops
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <ImageIcon className="w-3 h-3 text-emerald-500" />
+                          {totalPhotos}
+                        </span>
+                      </div>
+                      {checkpoints.length > 0 && (
+                        <div className="flex gap-1.5 flex-wrap">
+                          {checkpoints.map((cp: any, i: number) => (
+                            <span
+                              key={i}
+                              className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium"
+                            >
+                              {cp.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
+                    <JournalFox
+                      distanceKm={typeof trip.distance_km === "number" ? trip.distance_km : 0}
+                      stopCount={checkpoints.length || 0}
+                    />
+                  </div>
                 </div>
               </motion.div>
             );
