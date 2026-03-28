@@ -1,0 +1,559 @@
+﻿import { useEffect, useState } from "react";
+import { useAuth } from "@/hooks/useAuth";
+import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
+import { Button } from "@/components/ui/button";
+import { FloatingCard } from "@/components/ui/floating-card";
+import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { getTrips, getTripPhotosList, getPhotoPublicUrl, deleteTrip } from "@/lib/api";
+import { AiJournalWriter } from "@/components/AiJournalWriter";
+import { PhotoViewer } from "@/components/PhotoViewer";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogFooter,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog";
+
+const Journal = () => {
+  const { user, loading } = useAuth();
+  const navigate = useNavigate();
+  const [trips, setTrips] = useState<any[]>([]);
+  const [selectedTrip, setSelectedTrip] = useState<any | null>(null);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [viewerPhotos, setViewerPhotos] = useState<any[]>([]);
+  const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
+  const [showViewer, setShowViewer] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+
+  useEffect(() => {
+    if (!user && !loading) {
+      navigate("/");
+      return;
+    }
+    if (user) loadTrips();
+  }, [user, loading, navigate]);
+
+  // Handle browser/hardware back: close viewer first, then trip detail, then allow leaving /journal
+  useEffect(() => {
+    const handlePop = () => {
+      if (showViewer) setShowViewer(false);
+      else if (selectedTrip) setSelectedTrip(null);
+    };
+    window.addEventListener("popstate", handlePop);
+    return () => window.removeEventListener("popstate", handlePop);
+  }, [showViewer, selectedTrip]);
+
+  const loadTrips = async () => {
+    if (!user) return;
+
+    try {
+      const raw = await getTrips(user.id);
+
+      // Base trips with empty photos
+      const baseTrips = raw.map(t => ({
+        ...t,
+        _checkpoints: (t.checkpoints || []).map((cp: any) => ({
+          ...cp,
+          photos: [],
+        })),
+        _photosLoaded: false,
+      }));
+
+      // Preload photos for all trips so cover images show immediately
+      const tripsWithPhotos = await Promise.all(
+        baseTrips.map(async (trip: any) => {
+          try {
+            const photos = await getTripPhotosList(trip.id);
+
+            // Group photos by checkpoint_id
+            const byCheckpoint = new Map<string, any[]>();
+            for (const p of photos) {
+              const key = p.checkpoint_id || '__uncategorized__';
+              if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
+              byCheckpoint.get(key)!.push({
+                id: p.id,
+                objectUrl: getPhotoPublicUrl(p.storage_path),
+                caption: p.caption,
+                timestamp: new Date(p.taken_at || (p as any).created_at || 0).getTime(),
+              });
+            }
+
+            const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
+              ...cp,
+              photos: byCheckpoint.get(cp.id) || [],
+            }));
+
+            return {
+              ...trip,
+              _checkpoints: enrichedCheckpoints,
+              _photosLoaded: true,
+            };
+          } catch {
+            return trip; // fallback: no photos loaded
+          }
+        })
+      );
+
+      tripsWithPhotos.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      setTrips(tripsWithPhotos);
+    } catch (error) {
+      console.error("Failed to load trips:", error);
+      toast.error("Failed to load trips. Please check your connection.");
+      setTrips([]);
+    }
+  };
+
+  /**
+   * When a Supabase trip is selected, load its photos from the photos table,
+   * convert storage_path ΓåÆ public URL, and reconstruct checkpoint photo arrays.
+   */
+  const handleSelectTrip = async (trip: any) => {
+    if (!trip._photosLoaded) {
+      setLoadingPhotos(true);
+      try {
+        const photos = await getTripPhotosList(trip.id);
+
+        // Group photos by checkpoint_id
+        const byCheckpoint = new Map<string, any[]>();
+        for (const p of photos) {
+          const key = p.checkpoint_id || '__uncategorized__';
+          if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
+          byCheckpoint.get(key)!.push({
+            id: p.id,
+            objectUrl: getPhotoPublicUrl(p.storage_path),
+            caption: p.caption,
+            timestamp: new Date(p.taken_at || (p as any).created_at || 0).getTime(),
+          });
+        }
+
+        const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
+          ...cp,
+          photos: byCheckpoint.get(cp.id) || [],
+        }));
+
+        const enriched = { ...trip, _checkpoints: enrichedCheckpoints, _photosLoaded: true };
+
+        // Update the list so the thumbnail also refreshes
+        setTrips(prev => prev.map(t => t.id === trip.id ? enriched : t));
+        setSelectedTrip(enriched);
+        window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
+      } catch (error) {
+        console.error("Failed to load photos:", error);
+        setSelectedTrip(trip);
+        window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
+      } finally {
+        setLoadingPhotos(false);
+      }
+    } else {
+      setSelectedTrip(trip);
+      window.history.pushState({ journalTripDetail: true }, "", window.location.pathname);
+    }
+  };
+
+  const getTripPhotos = (trip: any) => {
+    if (!trip._checkpoints) return [];
+    return trip._checkpoints.flatMap((cp: any) =>
+      (cp.photos || []).map((p: any) => ({
+        id: p.id,
+        url: p.objectUrl,
+        caption: p.caption || cp.name,
+        checkpointName: cp.name,
+      }))
+    );
+  };
+
+  const getTripCheckpoints = (trip: any): any[] => trip._checkpoints || [];
+
+  const getTotalPhotos = (trip: any) =>
+    (trip._checkpoints || []).reduce((sum: number, cp: any) => sum + (cp.photos?.length || 0), 0);
+
+  const handleShareTrip = async (trip: any) => {
+    const checkpoints = getTripCheckpoints(trip);
+    const totalPhotos = getTotalPhotos(trip);
+    const date = new Date(trip.start_time || trip.created_at).toLocaleDateString("en-IN", {
+      day: "numeric", month: "short", year: "numeric",
+    });
+    const text = [
+      `My CalmTrip Journey`,
+      `${trip.destination || trip.origin || "Trip"} - ${date}`,
+      `${trip.distance_km?.toFixed(1) || 0}km traveled`,
+      `${checkpoints.length} stops | ${totalPhotos} photos`,
+      trip.duration_minutes ? `Duration: ${trip.duration_minutes} min` : "",
+      "",
+      "Tracked with CalmTrip - mindful travel journaling",
+    ].filter(Boolean).join("\n");
+
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: "My CalmTrip Journey", text });
+        return;
+      } catch (err) {
+        if ((err as Error).name === "AbortError") return;
+      }
+    }
+    await navigator.clipboard.writeText(text);
+    toast.success("Trip summary copied to clipboard!");
+  };
+
+  const openPhotoViewer = (trip: any, photoIndex: number) => {
+    const photos = getTripPhotos(trip);
+    if (photos.length === 0) return;
+    setViewerPhotos(photos);
+    setSelectedPhotoIndex(Math.min(photoIndex, photos.length - 1));
+    setShowViewer(true);
+    window.history.pushState({ photoViewer: true }, "", window.location.pathname);
+  };
+
+  const handleDeleteTrip = async (trip: any) => {
+    try {
+      await deleteTrip(trip.id);
+
+      // Remove from state
+      setTrips(prev => prev.filter(t => t.id !== trip.id));
+      
+      // Close trip detail view and dialog
+      setSelectedTrip(null);
+      setShowDeleteDialog(false);
+
+      toast.success("Trip deleted successfully");
+    } catch (error) {
+      console.error("Failed to delete trip:", error);
+      toast.error("Failed to delete trip. Please try again.");
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <p className="text-muted-foreground">Loading diary...</p>
+      </div>
+    );
+  }
+
+  // ΓöÇΓöÇ Trip detail (timeline) view ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  if (selectedTrip) {
+    const checkpoints = getTripCheckpoints(selectedTrip);
+    const allPhotos = getTripPhotos(selectedTrip);
+    const totalPhotos = getTotalPhotos(selectedTrip);
+
+    return (
+      <div className="min-h-screen bg-background pb-20">
+        {/* Trip Header */}
+        <header className="safe-top px-4 py-4">
+          <div className="flex items-center justify-between mb-6">
+            <Button variant="icon" size="icon" onClick={() => setSelectedTrip(null)}>
+              <ChevronLeft className="w-5 h-5" />
+            </Button>
+            <h1 className="font-display font-bold text-foreground">
+              {selectedTrip.destination || selectedTrip.origin || "Trip"}
+            </h1>
+            <div className="flex items-center gap-2">
+              <Button variant="icon" size="icon" onClick={() => handleShareTrip(selectedTrip)}>
+                <Share2 className="w-5 h-5" />
+              </Button>
+              <Button 
+                variant="icon" 
+                size="icon" 
+                onClick={() => setShowDeleteDialog(true)}
+                className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              >
+                <Trash2 className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-6"
+          >
+            <div className="w-20 h-20 mx-auto mb-3 rounded-full bg-gradient-to-br from-emerald-100 to-blue-100 flex items-center justify-center text-3xl shadow-md">
+              ≡ƒù║∩╕Å
+            </div>
+            <h2 className="font-display font-bold text-xl text-foreground">
+              {selectedTrip.destination || selectedTrip.origin}
+            </h2>
+            <p className="text-sm text-emerald-600 font-medium mt-1">
+              {new Date(selectedTrip.start_time || selectedTrip.created_at).toLocaleDateString("en-IN", {
+                day: "numeric", month: "short", year: "numeric",
+              })}
+            </p>
+            <div className="flex justify-center gap-3 mt-3">
+              <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full font-medium border border-emerald-200">
+                {checkpoints.length} Stops
+              </span>
+              <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full font-medium border border-emerald-200">
+                {totalPhotos} Photos
+              </span>
+              <span className="text-xs bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full font-medium border border-emerald-200">
+                {selectedTrip.distance_km?.toFixed(1)}km
+              </span>
+            </div>
+          </motion.div>
+        </header>
+
+        {/* Loading photos indicator */}
+        {loadingPhotos && (
+          <div className="px-4 mb-4">
+            <div className="bg-emerald-50 rounded-xl p-3 text-center">
+              <p className="text-xs text-emerald-600 animate-pulse">Loading photos...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Timeline */}
+        <main className="px-4">
+          {checkpoints.length > 0 ? (
+            <div className="relative">
+              <div className="absolute left-[19px] top-2 bottom-2 w-0.5 bg-gradient-to-b from-emerald-400 via-emerald-300 to-emerald-100" />
+
+              <div className="space-y-0">
+                {checkpoints.map((cp: any, idx: number) => {
+                  const cpPhotos = cp.photos || [];
+                  const time = cp.timestamp
+                    ? new Date(cp.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
+                    : "";
+
+                  return (
+                    <motion.div
+                      key={cp.id || idx}
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: idx * 0.15 }}
+                      className="relative pl-12 pb-8"
+                    >
+                      <div className="absolute left-2.5 top-1 w-4 h-4 rounded-full bg-emerald-500 border-[3px] border-white shadow-sm z-10" />
+
+                      {time && (
+                        <p className="text-xs font-semibold text-emerald-600 mb-1">{time}</p>
+                      )}
+
+                      <h3 className="font-display font-bold text-foreground text-base mb-1">
+                        Arrived at {cp.name}
+                      </h3>
+
+                      {cp.description && (
+                        <p className="text-sm text-muted-foreground mb-3 leading-relaxed">
+                          {cp.description}
+                        </p>
+                      )}
+
+                      {cpPhotos.length > 0 && (
+                        <div className={`mt-2 ${cpPhotos.length === 1 ? "" : "grid grid-cols-2 gap-2"}`}>
+                          {cpPhotos.map((photo: any, pIdx: number) => {
+                            const globalIdx = allPhotos.findIndex((p: any) => p.id === photo.id);
+                            return (
+                              <motion.div
+                                key={photo.id}
+                                initial={{ opacity: 0, scale: 0.9 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                transition={{ delay: idx * 0.15 + pIdx * 0.05 }}
+                                onClick={() => openPhotoViewer(selectedTrip, globalIdx >= 0 ? globalIdx : 0)}
+                                className={`relative rounded-xl overflow-hidden cursor-pointer group shadow-sm ${
+                                  cpPhotos.length === 1 ? "aspect-[16/10]" : "aspect-square"
+                                }`}
+                              >
+                                <img
+                                  src={photo.objectUrl}
+                                  alt={photo.caption || cp.name}
+                                  className="w-full h-full object-cover"
+                                />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all" />
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {cpPhotos.length === 0 && idx < checkpoints.length - 1 && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground mt-1">
+                          <Navigation className="w-3 h-3" />
+                          <span>Continuing journey...</span>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })}
+
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: checkpoints.length * 0.15 }}
+                  className="relative pl-12 pb-4"
+                >
+                  <div className="absolute left-2 top-1 w-5 h-5 rounded-full bg-emerald-100 border-[3px] border-emerald-500 z-10 flex items-center justify-center">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  </div>
+                  <p className="text-xs font-semibold text-emerald-600">Trip completed</p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedTrip.distance_km?.toFixed(1)}km traveled
+                    {selectedTrip.duration_minutes ? ` in ${selectedTrip.duration_minutes} min` : ""}
+                  </p>
+                </motion.div>
+              </div>
+            </div>
+          ) : (
+            <FloatingCard className="text-center py-8">
+              <Camera className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">No checkpoints recorded for this trip</p>
+            </FloatingCard>
+          )}
+        </main>
+
+        {/* AI Journal Writer */}
+        <AiJournalWriter trip={selectedTrip} />
+
+        {showViewer && viewerPhotos.length > 0 && (
+          <PhotoViewer
+            photos={viewerPhotos}
+            initialIndex={selectedPhotoIndex}
+            onClose={() => setShowViewer(false)}
+          />
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this trip?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently delete the trip and all {getTotalPhotos(selectedTrip)} associated photos.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-500 hover:bg-red-600"
+                onClick={() => handleDeleteTrip(selectedTrip)}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    );
+  }
+
+  // ΓöÇΓöÇ Trip list view ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+  return (
+    <div className="min-h-screen bg-background pb-20">
+      <header className="safe-top px-4 py-6">
+        <h1 className="font-display font-bold text-2xl text-foreground mb-1">Travel Diary</h1>
+        <p className="text-sm text-muted-foreground">Your journey moments, preserved</p>
+      </header>
+
+      <main className="px-4 space-y-3">
+        {trips.length > 0 ? (
+          trips.map((trip: any, idx: number) => {
+            const checkpoints = getTripCheckpoints(trip);
+            const totalPhotos = getTotalPhotos(trip);
+            const firstPhoto = checkpoints.find((cp: any) => cp.photos?.length > 0)?.photos?.[0];
+
+            return (
+              <motion.div
+                key={trip.id}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: idx * 0.08 }}
+                onClick={() => handleSelectTrip(trip)}
+                className="bg-card rounded-2xl overflow-hidden shadow-soft cursor-pointer active:scale-[0.98] transition-transform border border-border/50"
+              >
+                {firstPhoto ? (
+                  <div className="relative h-36">
+                    <img
+                      src={firstPhoto.objectUrl}
+                      alt={trip.destination}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/20 to-transparent" />
+                    <div className="absolute bottom-3 left-3 right-3">
+                      <h3 className="font-display font-bold text-white text-lg leading-tight">
+                        {trip.destination || trip.origin || "Trip"}
+                      </h3>
+                      <p className="text-white/80 text-xs mt-0.5">
+                        {new Date(trip.created_at).toLocaleDateString("en-IN", {
+                          day: "numeric", month: "short", year: "numeric",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="relative h-28 bg-gradient-to-br from-emerald-50 to-blue-50">
+                    <div className="absolute inset-0 flex items-center justify-center text-4xl opacity-30">
+                      ≡ƒù║∩╕Å
+                    </div>
+                    <div className="absolute bottom-3 left-3 right-3">
+                      <h3 className="font-display font-bold text-foreground text-lg leading-tight">
+                        {trip.destination || trip.origin || "Trip"}
+                      </h3>
+                      <p className="text-muted-foreground text-xs mt-0.5">
+                        {new Date(trip.created_at).toLocaleDateString("en-IN", {
+                          day: "numeric", month: "short", year: "numeric",
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-3">
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground mb-2">
+                    <span className="flex items-center gap-1">
+                      <Navigation className="w-3 h-3 text-emerald-500" />
+                      {trip.distance_km?.toFixed(1)}km
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-emerald-500" />
+                      {trip.duration_minutes || 0}min
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-emerald-500" />
+                      {checkpoints.length} stops
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3 text-emerald-500" />
+                      {totalPhotos}
+                    </span>
+                  </div>
+
+                  {checkpoints.length > 0 && (
+                    <div className="flex gap-1.5 flex-wrap">
+                      {checkpoints.map((cp: any, i: number) => (
+                        <span
+                          key={i}
+                          className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full font-medium"
+                        >
+                          {cp.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })
+        ) : (
+          <FloatingCard className="text-center py-16">
+            <div className="text-6xl mb-4">≡ƒôö</div>
+            <h3 className="font-display font-semibold text-foreground mb-2">No trips yet</h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              Start a journey to fill your travel diary
+            </p>
+            <Button variant="calm" onClick={() => navigate("/map")}>
+              <MapPin className="w-4 h-4 mr-2" />
+              Start Trip
+            </Button>
+          </FloatingCard>
+        )}
+      </main>
+    </div>
+  );
+};
+
+export default Journal;

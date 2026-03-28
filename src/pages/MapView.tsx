@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CheckpointDialog } from "@/components/CheckpointDialog";
 import { ChevronLeft, Crosshair, MapPin, Play, Pause, Square, Zap, Plus, X, ChevronDown, Navigation } from "lucide-react";
 import { Checkpoint, CheckpointPhoto } from "@/lib/supabase";
-import { useToast } from "@/hooks/use-toast";
-import { saveLocalTrip } from "@/lib/localTrips";
+import { toast } from "sonner";
 import { createTrip, uploadTripPhoto } from "@/lib/api";
 import { AiNearbyPlaces } from "@/components/AiNearbyPlaces";
 import L from "leaflet";
@@ -73,7 +72,6 @@ const MapView = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading } = useAuth();
-  const { toast } = useToast();
   const {
     tripData, startTrip, endTrip,
     addLocation, addCheckpoint, addPhotoToCheckpoint, updateCheckpointName,
@@ -100,13 +98,12 @@ const MapView = () => {
   isTrackingRef.current = isTracking;
 
   const onCheckpointReached = useCallback((checkpoint: Checkpoint) => {
-    toast({
-      title: `Reached: ${checkpoint.name}!`,
+    toast.success(`Reached: ${checkpoint.name}!`, {
       description: "Journal time! Add photos to remember this stop.",
     });
     setActiveCheckpointId(checkpoint.id);
     setCheckpointDialogOpen(true);
-  }, [toast]);
+  }, []);
 
   const {
     simState, customCheckpoints, routePoints,
@@ -192,7 +189,10 @@ const MapView = () => {
   // ── Trip save: local first, then Supabase ──────────────────
 
   const saveTripData = async (data: typeof tripData) => {
-    if (data.locations.length === 0) return;
+    if (data.locations.length === 0) {
+      toast("Trip too short", { description: "No route was recorded. Move around to track a trip." });
+      return;
+    }
 
     const origin = data.checkpoints[0]?.name || "Start";
     const destination = data.checkpoints[data.checkpoints.length - 1]?.name || origin;
@@ -210,87 +210,66 @@ const MapView = () => {
       description: cp.description,
     }));
 
-    // Try Supabase first to get a canonical ID for deduplication
-    let tripId = crypto.randomUUID();
-    let savedToSupabase = false;
+    if (!user) {
+      toast.error("You must be logged in to save trips.");
+      return;
+    }
 
-    if (user) {
+    try {
+      const tripPayload: any = {
+        user_id: user.id,
+        origin,
+        destination,
+        start_time: new Date(data.startTime).toISOString(),
+        end_time: now,
+        distance_km: distanceKm,
+        duration_minutes: durationMinutes,
+        route_coordinates: routeCoords,
+        checkpoints: checkpointsMeta,
+      };
+      let trip: any;
       try {
-        const tripPayload: any = {
-          user_id: user.id,
-          origin,
-          destination,
-          start_time: new Date(data.startTime).toISOString(),
-          end_time: now,
-          distance_km: distanceKm,
-          duration_minutes: durationMinutes,
-          route_coordinates: routeCoords,
-          checkpoints: checkpointsMeta,
-        };
-        let trip: any;
-        try {
-          trip = await createTrip(tripPayload);
-        } catch (e: any) {
-          // If checkpoints column doesn't exist yet (migration not run), retry without it
-          if (e?.code === 'PGRST204' || e?.message?.includes('checkpoints')) {
-            const { checkpoints: _dropped, ...withoutCheckpoints } = tripPayload;
-            trip = await createTrip(withoutCheckpoints);
-          } else {
-            throw e;
-          }
+        trip = await createTrip(tripPayload);
+      } catch (e: any) {
+        // If checkpoints column doesn't exist yet (migration not run), retry without it
+        if (e?.code === 'PGRST204' || e?.message?.includes('checkpoints')) {
+          const { checkpoints: _dropped, ...withoutCheckpoints } = tripPayload;
+          trip = await createTrip(withoutCheckpoints);
+        } else {
+          throw e;
         }
-        tripId = trip.id;
-        savedToSupabase = true;
+      }
+      const tripId = trip.id;
 
-        // Upload each photo that has a corresponding File
-        for (const cp of data.checkpoints) {
-          for (const photo of cp.photos) {
-            const file = photoFilesRef.current.get(photo.id);
-            if (file) {
-              try {
-                await uploadTripPhoto(
-                  user.id,
-                  tripId,
-                  cp.id,
-                  file,
-                  photo.caption,
-                  cp.lat,
-                  cp.lng
-                );
-              } catch (err) {
-                console.error("Photo upload failed:", err);
-              }
+      // Upload each photo that has a corresponding File
+      for (const cp of data.checkpoints) {
+        for (const photo of cp.photos) {
+          const file = photoFilesRef.current.get(photo.id);
+          if (file) {
+            try {
+              await uploadTripPhoto(
+                user.id,
+                tripId,
+                cp.id,
+                file,
+                photo.caption,
+                cp.lat,
+                cp.lng
+              );
+            } catch (err) {
+              console.error("Photo upload failed:", err);
             }
           }
         }
-      } catch (err) {
-        console.error("Supabase trip save failed, falling back to local:", err);
       }
+
+      photoFilesRef.current.clear();
+
+      toast.success("Trip saved", { description: "Saved to your diary." });
+    } catch (err) {
+      console.error("Failed to save trip:", err);
+      toast.error("Failed to save trip", { description: "Please check your connection and try again." });
     }
-
-    // Always save locally (offline backup). Use the same ID so Journal
-    // deduplication prevents showing the trip twice.
-    saveLocalTrip({
-      id: tripId,
-      user_id: user?.id || "local",
-      origin,
-      destination,
-      start_time: new Date(data.startTime).toISOString(),
-      end_time: now,
-      distance_km: distanceKm,
-      duration_minutes: durationMinutes,
-      route_coordinates: routeCoords,
-      checkpoints: data.checkpoints,
-    });
-
-    photoFilesRef.current.clear();
-
-    toast({
-      title: savedToSupabase ? "Trip saved to your diary!" : "Trip saved locally!",
-      description: savedToSupabase
-        ? "Your journey and photos are in the cloud."
-        : "Will sync when connection is available.",
-    });
   };
 
   // Real GPS trip: Start / End
@@ -311,14 +290,14 @@ const MapView = () => {
         });
       }
 
-      toast({ title: "Trip started!", description: "Walk around — your route is being tracked." });
+      toast.success("Trip started!", { description: "Walk around — your route is being tracked." });
     }
   };
 
   // Simulation handlers
   const handleStartSimulation = () => {
     if (customCheckpoints.length < 2) {
-      toast({ title: "Need at least 2 checkpoints", description: "Add more stops to simulate a trip." });
+      toast("Need at least 2 checkpoints", { description: "Add more stops to simulate a trip." });
       return;
     }
     if (watchIdRef.current !== null) {
@@ -340,7 +319,7 @@ const MapView = () => {
   // Add a checkpoint at current GPS location
   const handleAddCheckpoint = () => {
     if (!currentLocation) {
-      toast({ title: "No location", description: "Waiting for GPS signal..." });
+      toast("No location", { description: "Waiting for GPS signal..." });
       return;
     }
     const cp: Checkpoint = {
@@ -369,7 +348,7 @@ const MapView = () => {
   };
 
   const polyPositions: [number, number][] = tripData.locations.map((l) => [l.latitude, l.longitude]);
-  const totalPhotos = tripData.checkpoints.reduce((sum, cp) => sum + cp.photos.length, 0);
+  const totalPhotos = tripData.checkpoints.reduce((sum, cp) => sum + (cp.photos?.length ?? 0), 0);
 
   if (loading || (!currentLocation && !locationError && polyPositions.length === 0)) {
     return (
@@ -430,7 +409,7 @@ const MapView = () => {
             <Popup>
               <div className="text-sm font-semibold">{cp.name}</div>
               {cp.description && <div className="text-xs text-gray-500">{cp.description}</div>}
-              <div className="text-xs">{cp.photos.length} photos</div>
+              <div className="text-xs">{cp.photos?.length ?? 0} photos</div>
             </Popup>
           </Marker>
         ))}
@@ -450,7 +429,7 @@ const MapView = () => {
         ))}
 
         {tripData.checkpoints.flatMap((cp) =>
-          cp.photos.map((photo, i) => (
+          (cp.photos ?? []).map((photo, i) => (
             <Marker
               key={photo.id}
               position={[cp.lat + i * 0.0001, cp.lng + i * 0.0001]}

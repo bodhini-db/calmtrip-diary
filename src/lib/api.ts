@@ -1,5 +1,39 @@
 import { supabase, Trip, Photo, TripCheckpointMeta } from './supabase';
 
+// ── Profile API ───────────────────────────────────────────────────
+
+export interface UserProfile {
+  full_name?: string;
+  avatar_url?: string;
+}
+
+export const getProfileFromUser = (user: { user_metadata?: Record<string, unknown> }): UserProfile => ({
+  full_name: (user.user_metadata?.full_name as string) || undefined,
+  avatar_url: (user.user_metadata?.avatar_url as string) || undefined,
+});
+
+export const updateProfile = async (updates: { full_name?: string; avatar_url?: string }) => {
+  const { data, error } = await supabase.auth.updateUser({
+    data: updates,
+  });
+  if (error) throw error;
+  return data.user;
+};
+
+export const uploadAvatar = async (userId: string, file: File): Promise<string> => {
+  const ext = file.name.split('.').pop() || 'jpg';
+  const path = `${userId}/avatar.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('photos')
+    .upload(path, file, { contentType: file.type, upsert: true });
+
+  if (uploadError) throw uploadError;
+
+  const { data } = supabase.storage.from('photos').getPublicUrl(path);
+  return data.publicUrl;
+};
+
 // ── Trip API ──────────────────────────────────────────────────
 
 export const createTrip = async (
@@ -83,6 +117,40 @@ export const addTripComment = async (tripId: string, userId: string, comment: st
   return data;
 };
 
+/**
+ * Delete a trip and all its associated data:
+ * - All photos from storage
+ * - All photo records from database
+ * - The trip record itself
+ */
+export const deleteTrip = async (tripId: string) => {
+  const photos = await getTripPhotosList(tripId);
+  const storagePaths = photos.map(p => p.storage_path).filter(Boolean);
+  if (storagePaths.length > 0) {
+    const { error: storageError } = await supabase.storage
+      .from('photos')
+      .remove(storagePaths);
+    if (storageError) {
+      console.warn('Failed to delete some photos from storage:', storageError);
+      // Continue with database deletion even if storage deletion fails
+    }
+  }
+
+  if (photos.length > 0) {
+    const { error: photosError } = await supabase
+      .from('photos')
+      .delete()
+      .eq('trip_id', tripId);
+    if (photosError) throw photosError;
+  }
+
+  const { error: tripError } = await supabase
+    .from('trips')
+    .delete()
+    .eq('id', tripId);
+  if (tripError) throw tripError;
+};
+
 // ── Photo API ─────────────────────────────────────────────────
 
 /**
@@ -106,15 +174,17 @@ export const uploadTripPhoto = async (
 
   if (uploadError) throw uploadError;
 
+  // photos table columns: id, user_id, trip_id, storage_path, latitude (NOT NULL), longitude (NOT NULL)
+  // Optional columns: checkpoint_id, caption, taken_at, emoji_mood
   const { data: photoData, error: photoError } = await supabase
     .from('photos')
     .insert([{
       user_id: userId,
       trip_id: tripId,
-      checkpoint_id: checkpointId,
       storage_path: fileName,
       latitude: lat,
       longitude: lng,
+      checkpoint_id: checkpointId || null,
       caption: caption || null,
       taken_at: new Date().toISOString(),
     }])
@@ -125,13 +195,13 @@ export const uploadTripPhoto = async (
   return photoData as Photo;
 };
 
-/** Returns all photos for a trip ordered by taken_at. */
+/** Returns all photos for a trip (ordered by id; add taken_at column in DB for time order). */
 export const getTripPhotosList = async (tripId: string) => {
   const { data, error } = await supabase
     .from('photos')
     .select('*')
     .eq('trip_id', tripId)
-    .order('taken_at', { ascending: true });
+    .order('id', { ascending: true });
   if (error) throw error;
   return data as Photo[];
 };
