@@ -74,7 +74,86 @@ CREATE POLICY "Users can delete own trips"
   USING (auth.uid() = user_id);
 ```
 
-### 3. Photos
+### 3. Profiles
+Stores public traveler profile metadata.
+
+```sql
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username TEXT UNIQUE NOT NULL,
+  full_name TEXT,
+  avatar_url TEXT,
+  bio TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_profiles_username ON profiles(username);
+
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read profiles"
+  ON profiles FOR SELECT
+  USING (auth.uid() IS NOT NULL);
+
+CREATE POLICY "Users can insert own profile"
+  ON profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
+CREATE POLICY "Users can update own profile"
+  ON profiles FOR UPDATE
+  USING (auth.uid() = id);
+
+CREATE POLICY "Users can delete own profile"
+  ON profiles FOR DELETE
+  USING (auth.uid() = id);
+```
+
+### 4. Follows
+Stores user follow relationships for the community feed.
+
+```sql
+CREATE TABLE follows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  follower_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX idx_follows_unique ON follows(follower_id, following_id);
+
+ALTER TABLE follows ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own follows"
+  ON follows FOR SELECT
+  USING (auth.uid() = follower_id);
+
+CREATE POLICY "Users can insert follows"
+  ON follows FOR INSERT
+  WITH CHECK (auth.uid() = follower_id);
+
+CREATE POLICY "Users can delete own follows"
+  ON follows FOR DELETE
+  USING (auth.uid() = follower_id);
+```
+
+### 5. Followed trips feed
+Allows authenticated users to read trips posted by people they follow.
+
+```sql
+CREATE POLICY "Users can read followed trips"
+  ON trips FOR SELECT
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1
+      FROM follows
+      WHERE follower_id = auth.uid()
+        AND following_id = trips.user_id
+    )
+  );
+```
+
+### 6. Photos
 Stores photo metadata and geo-tagging information.
 
 ```sql

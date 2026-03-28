@@ -34,6 +34,55 @@ export const getTripById = async (tripId: string) => {
   return data as Trip;
 };
 
+export const getTripLikeCount = async (tripId: string) => {
+  const { count, error } = await supabase
+    .from('trip_likes')
+    .select('id', { count: 'exact', head: true })
+    .eq('trip_id', tripId);
+  if (error && !error.message?.includes('does not exist')) throw error;
+  return count ?? 0;
+};
+
+export const getTripCommentCount = async (tripId: string) => {
+  const { count, error } = await supabase
+    .from('trip_comments')
+    .select('id', { count: 'exact', head: true })
+    .eq('trip_id', tripId);
+  if (error && !error.message?.includes('does not exist')) throw error;
+  return count ?? 0;
+};
+
+export const toggleTripLike = async (tripId: string, userId: string, shouldLike: boolean) => {
+  if (shouldLike) {
+    const { error } = await supabase.from('trip_likes').insert([
+      { trip_id: tripId, user_id: userId },
+    ]);
+    if (error && !error.message?.includes('duplicate key value')) throw error;
+    return true;
+  }
+
+  const { error } = await supabase
+    .from('trip_likes')
+    .delete()
+    .eq('trip_id', tripId)
+    .eq('user_id', userId);
+  if (error && !error.message?.includes('does not exist')) throw error;
+  return false;
+};
+
+export const addTripComment = async (tripId: string, userId: string, comment: string) => {
+  const { data, error } = await supabase.from('trip_comments').insert([
+    {
+      trip_id: tripId,
+      user_id: userId,
+      comment,
+    },
+  ]).select().single();
+
+  if (error && !error.message?.includes('does not exist')) throw error;
+  return data;
+};
+
 // ── Photo API ─────────────────────────────────────────────────
 
 /**
@@ -96,6 +145,25 @@ export const uploadPhoto = async (
   longitude: number
 ) => {
   return uploadTripPhoto(userId, tripId, '', file, undefined, latitude, longitude);
+};
+
+export const uploadProfileAvatar = async (userId: string, file: File) => {
+  const ext = file.name.split('.').pop() || 'jpg';
+  const fileName = `avatars/${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from('photos')
+    .upload(fileName, file, { contentType: file.type });
+  if (uploadError) throw uploadError;
+
+  const publicUrl = getPhotoPublicUrl(fileName);
+  const { error: updateError } = await supabase
+    .from('profiles')
+    .update({ avatar_url: publicUrl })
+    .eq('id', userId);
+  if (updateError) throw updateError;
+
+  return publicUrl;
 };
 
 /** @deprecated use getTripPhotosList */

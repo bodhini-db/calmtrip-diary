@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, User } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -23,12 +23,68 @@ export const getCurrentUser = async () => {
   }
 };
 
+const sanitizeUsername = (email: string) => {
+  return email
+    .split('@')[0]
+    .replace(/[^a-zA-Z0-9_]/g, '')
+    .slice(0, 20) || 'traveler';
+};
+
+export const ensureUserProfile = async (user: User | null) => {
+  if (!user) return;
+
+  const username = user.email ? sanitizeUsername(user.email) : user.id.slice(0, 12);
+  const { data: existing, error: existingError } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (existingError && !existingError.message?.includes('does not exist')) {
+    console.warn('Could not check profile existence:', existingError.message);
+    return;
+  }
+
+  if (!existing) {
+    const { error } = await supabase.from('profiles').insert([
+      {
+        id: user.id,
+        username,
+        full_name: user.user_metadata?.full_name || null,
+        avatar_url: user.user_metadata?.avatar_url || null,
+        bio: null,
+      },
+    ]);
+    if (error) {
+      console.warn('Could not create profile record:', error.message);
+    }
+  }
+};
+
 export const signUp = async (email: string, password: string) => {
-  return supabase.auth.signUp({ email, password });
+  const result = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${window.location.origin}/auth/confirm`,
+    },
+  });
+
+  const user = result.data?.user ?? null;
+  if (user) {
+    await ensureUserProfile(user);
+  }
+
+  return result;
 };
 
 export const signIn = async (email: string, password: string) => {
-  return supabase.auth.signInWithPassword({ email, password });
+  const result = await supabase.auth.signInWithPassword({ email, password });
+  const user = result.data?.user ?? null;
+  if (user) {
+    await ensureUserProfile(user);
+  }
+  return result;
 };
 
 export const signOut = async () => {

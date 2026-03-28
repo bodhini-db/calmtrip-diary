@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, ensureUserProfile } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 
 export const useAuth = () => {
@@ -14,6 +14,9 @@ export const useAuth = () => {
     const checkSession = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await ensureUserProfile(user);
+        }
         if (mounted) setUser(user);
       } catch (err) {
         if (mounted) setError(err instanceof Error ? err.message : 'Unknown error');

@@ -1,10 +1,12 @@
-import { Home, BookOpen, BarChart3, Settings } from "lucide-react";
+import { Home, BookOpen, BarChart3, Settings, Rss, Compass } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
 const navItems = [
   { icon: Home, label: "Home", path: "/home" },
+  { icon: Rss, label: "Feed", path: "/feed" },
+  { icon: Compass, label: "Discover", path: "/discover" },
   { icon: BookOpen, label: "Journal", path: "/journal" },
   { icon: BarChart3, label: "Stats", path: "/stats" },
   { icon: Settings, label: "Settings", path: "/settings" },

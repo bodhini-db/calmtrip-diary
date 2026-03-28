@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
 import { FloatingCard } from "@/components/ui/floating-card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ChevronLeft, Share2, MapPin, Image as ImageIcon, Clock, Navigation, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { getTrips, getTripPhotosList, getPhotoPublicUrl } from "@/lib/api";
+import { useIsFollowing } from "@/hooks/useFollow";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { AiJournalWriter } from "@/components/AiJournalWriter";
 import { getLocalTrips } from "@/lib/localTrips";
 import { PhotoViewer } from "@/components/PhotoViewer";
@@ -14,27 +20,115 @@ import { PhotoViewer } from "@/components/PhotoViewer";
 const Journal = () => {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
+  const params = useParams();
+  const targetUserId = params.userId ?? user?.id;
+  const targetTripId = params.tripId;
+  const isOwnJournal = !params.userId || params.userId === user?.id;
+  const { data: isFollowing = false, isLoading: isFollowingLoading } = useIsFollowing(targetUserId || '');
+  const { data: profile, isLoading: profileLoading } = useUserProfile(targetUserId);
   const [trips, setTrips] = useState<any[]>([]);
   const [selectedTrip, setSelectedTrip] = useState<any | null>(null);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [viewerPhotos, setViewerPhotos] = useState<any[]>([]);
   const [selectedPhotoIndex, setSelectedPhotoIndex] = useState(0);
   const [showViewer, setShowViewer] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [comments, setComments] = useState<Array<{ id: string; author: string; text: string; created_at: string }>>([]);
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+
+  const hydrateTrip = async (trip: any) => {
+    if (!trip || trip._local || trip._photosLoaded) return trip;
+    setLoadingPhotos(true);
+
+    try {
+      const photos = await getTripPhotosList(trip.id);
+      const byCheckpoint = new Map<string, any[]>();
+      for (const p of photos) {
+        const key = p.checkpoint_id || '__uncategorized__';
+        if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
+        byCheckpoint.get(key)!.push({
+          id: p.id,
+          objectUrl: getPhotoPublicUrl(p.storage_path),
+          caption: p.caption,
+          timestamp: new Date(p.taken_at).getTime(),
+        });
+      }
+
+      const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
+        ...cp,
+        photos: byCheckpoint.get(cp.id) || [],
+      }));
+
+      const enriched = { ...trip, _checkpoints: enrichedCheckpoints, _photosLoaded: true };
+      setTrips(prev => prev.map((t: any) => t.id === trip.id ? enriched : t));
+      return enriched;
+    } catch {
+      return trip;
+    } finally {
+      setLoadingPhotos(false);
+    }
+  };
 
   useEffect(() => {
     if (!user && !loading) {
       navigate("/");
       return;
     }
-    if (user) loadTrips();
-  }, [user, loading, navigate]);
 
-  const loadTrips = async () => {
+    if (!user || !targetUserId) return;
+
+    if (isOwnJournal || isFollowing) {
+      loadTrips(targetUserId);
+    } else if (!isFollowingLoading) {
+      setTrips([]);
+      setSelectedTrip(null);
+    }
+  }, [user, loading, targetUserId, isOwnJournal, isFollowing, isFollowingLoading, navigate]);
+
+  useEffect(() => {
+    if (!selectedTrip) {
+      setComments([]);
+      return;
+    }
+
+    const stored = window.localStorage.getItem(`journal-comments-${selectedTrip.id}`);
+    if (stored) {
+      try {
+        setComments(JSON.parse(stored));
+      } catch {
+        setComments([]);
+      }
+    } else {
+      setComments([]);
+    }
+  }, [selectedTrip?.id]);
+
+  const persistComments = (tripId: string, nextComments: Array<{ id: string; author: string; text: string; created_at: string }>) => {
+    window.localStorage.setItem(`journal-comments-${tripId}`, JSON.stringify(nextComments));
+  };
+
+  const handleAddComment = async () => {
+    if (!selectedTrip || !commentText.trim()) return;
+    setCommentSubmitting(true);
+    const nextComment = {
+      id: `${Date.now()}`,
+      author: user?.user_metadata?.full_name || user?.email || 'You',
+      text: commentText.trim(),
+      created_at: new Date().toISOString(),
+    };
+    const nextComments = [...comments, nextComment];
+    setComments(nextComments);
+    persistComments(selectedTrip.id, nextComments);
+    setCommentText('');
+    setCommentSubmitting(false);
+  };
+
+  const loadTrips = async (ownerId: string) => {
     if (!user) return;
 
     let supabaseTrips: any[] = [];
     try {
-      const raw = await getTrips(user.id);
+      const raw = await getTrips(ownerId);
       // Mark as Supabase trips; photos loaded on demand
       supabaseTrips = raw.map(t => ({
         ...t,
@@ -49,12 +143,39 @@ const Journal = () => {
       // Supabase unavailable — fall back to local only
     }
 
-    const localTrips = getLocalTrips(user.id).map(lt => ({
-      ...lt,
-      _local: true,
-      _checkpoints: lt.checkpoints,
-      _photosLoaded: true,
-    }));
+    if (supabaseTrips.length > 0) {
+      const previewPhotos = await Promise.all(
+        supabaseTrips.map(async (trip) => {
+          try {
+            const photos = await getTripPhotosList(trip.id);
+            return {
+              tripId: trip.id,
+              previewPhotoUrl: photos.length > 0 ? getPhotoPublicUrl(photos[0].storage_path) : null,
+            };
+          } catch {
+            return { tripId: trip.id, previewPhotoUrl: null };
+          }
+        })
+      );
+      supabaseTrips = supabaseTrips.map((trip) => {
+        const preview = previewPhotos.find((record) => record.tripId === trip.id);
+        return { ...trip, _previewPhotoUrl: preview?.previewPhotoUrl ?? null };
+      });
+    }
+
+    const localTrips = getLocalTrips(user.id).map(lt => {
+      const firstLocalPhoto = lt.checkpoints
+        .flatMap((cp: any) => cp.photos || [])
+        .find((photo: any) => photo.objectUrl)?.objectUrl;
+
+      return {
+        ...lt,
+        _local: true,
+        _checkpoints: lt.checkpoints,
+        _photosLoaded: true,
+        _previewPhotoUrl: firstLocalPhoto ?? null,
+      };
+    });
 
     // Merge: Supabase is source of truth; local fills gaps
     const merged = [...supabaseTrips];
@@ -63,6 +184,13 @@ const Journal = () => {
     }
     merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setTrips(merged);
+    if (targetTripId) {
+      const selected = merged.find((trip) => trip.id === targetTripId);
+      if (selected) {
+        const hydrated = await hydrateTrip(selected);
+        setSelectedTrip(hydrated);
+      }
+    }
   };
 
   /**
@@ -70,42 +198,8 @@ const Journal = () => {
    * convert storage_path → public URL, and reconstruct checkpoint photo arrays.
    */
   const handleSelectTrip = async (trip: any) => {
-    if (!trip._local && !trip._photosLoaded) {
-      setLoadingPhotos(true);
-      try {
-        const photos = await getTripPhotosList(trip.id);
-
-        // Group photos by checkpoint_id
-        const byCheckpoint = new Map<string, any[]>();
-        for (const p of photos) {
-          const key = p.checkpoint_id || '__uncategorized__';
-          if (!byCheckpoint.has(key)) byCheckpoint.set(key, []);
-          byCheckpoint.get(key)!.push({
-            id: p.id,
-            objectUrl: getPhotoPublicUrl(p.storage_path),
-            caption: p.caption,
-            timestamp: new Date(p.taken_at).getTime(),
-          });
-        }
-
-        const enrichedCheckpoints = (trip.checkpoints || []).map((cp: any) => ({
-          ...cp,
-          photos: byCheckpoint.get(cp.id) || [],
-        }));
-
-        const enriched = { ...trip, _checkpoints: enrichedCheckpoints, _photosLoaded: true };
-
-        // Update the list so the thumbnail also refreshes
-        setTrips(prev => prev.map(t => t.id === trip.id ? enriched : t));
-        setSelectedTrip(enriched);
-      } catch {
-        setSelectedTrip(trip);
-      } finally {
-        setLoadingPhotos(false);
-      }
-    } else {
-      setSelectedTrip(trip);
-    }
+    const hydrated = await hydrateTrip(trip);
+    setSelectedTrip(hydrated);
   };
 
   const getTripPhotos = (trip: any) => {
@@ -164,6 +258,19 @@ const Journal = () => {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <p className="text-muted-foreground">Loading diary...</p>
+      </div>
+    );
+  }
+
+  if (!isOwnJournal && params.userId && !isFollowing && !isFollowingLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="rounded-3xl border border-border bg-card p-10 text-center shadow-soft">
+          <h1 className="text-2xl font-semibold text-foreground mb-3">Journal locked</h1>
+          <p className="text-sm text-muted-foreground">
+            Follow this traveler to read their journal entries.
+          </p>
+        </div>
       </div>
     );
   }
@@ -328,8 +435,59 @@ const Journal = () => {
           )}
         </main>
 
+        <Card className="mx-4 mt-6 p-4 border border-border bg-card">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Comments</p>
+              <p className="text-xs text-muted-foreground">{comments.length} {comments.length === 1 ? 'comment' : 'comments'}</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <p className="text-xs text-muted-foreground">Share your thoughts on this trip</p>
+            </div>
+          </div>
+
+          <Textarea
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            placeholder="Write a comment..."
+            rows={4}
+          />
+
+          <div className="mt-4 flex justify-end">
+            <Button
+              onClick={handleAddComment}
+              disabled={!commentText.trim() || commentSubmitting}
+            >
+              Comment
+            </Button>
+          </div>
+
+          <div className="mt-6 space-y-4">
+            {comments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No comments yet — be the first to add one.</p>
+            ) : (
+              comments.map((comment) => (
+                <div key={comment.id} className="rounded-3xl border border-border bg-background p-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Avatar className="h-10 w-10">
+                      <AvatarFallback>{comment.author.charAt(0).toUpperCase()}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <p className="text-sm font-semibold text-foreground truncate">{comment.author}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {new Date(comment.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-sm text-foreground">{comment.text}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </Card>
+
         {/* AI Journal Writer */}
-        <AiJournalWriter trip={selectedTrip} />
+        {isOwnJournal && <AiJournalWriter trip={selectedTrip} />}
 
         {showViewer && (
           <PhotoViewer
@@ -346,8 +504,31 @@ const Journal = () => {
   return (
     <div className="min-h-screen bg-background pb-20">
       <header className="safe-top px-4 py-6">
-        <h1 className="font-display font-bold text-2xl text-foreground mb-1">Travel Diary</h1>
-        <p className="text-sm text-muted-foreground">Your journey moments, preserved</p>
+        <h1 className="font-display font-bold text-2xl text-foreground mb-1">
+          {isOwnJournal ? 'Travel Diary' : `${profile?.full_name || profile?.username}'s Journal`}
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          {isOwnJournal
+            ? 'Your journey moments, preserved'
+            : 'Travel stories from someone you follow'}
+        </p>
+
+        {!isOwnJournal && profile && (
+          <div className="mt-6 flex flex-col gap-4 rounded-3xl border border-border bg-card p-4 sm:flex-row sm:items-center">
+            <Avatar className="h-16 w-16">
+              {profile.avatar_url ? (
+                <AvatarImage src={profile.avatar_url} alt={profile.username} />
+              ) : (
+                <AvatarFallback>{profile.username.charAt(0).toUpperCase()}</AvatarFallback>
+              )}
+            </Avatar>
+            <div>
+              <p className="text-lg font-semibold text-foreground">{profile.full_name || profile.username}</p>
+              <p className="text-sm text-muted-foreground">@{profile.username}</p>
+              {profile.bio && <p className="text-sm text-muted-foreground mt-1">{profile.bio}</p>}
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="px-4 space-y-3">
@@ -356,6 +537,7 @@ const Journal = () => {
             const checkpoints = getTripCheckpoints(trip);
             const totalPhotos = getTotalPhotos(trip);
             const firstPhoto = checkpoints.find((cp: any) => cp.photos?.length > 0)?.photos?.[0];
+            const previewPhoto = trip._previewPhotoUrl || firstPhoto?.objectUrl;
 
             return (
               <motion.div
@@ -366,10 +548,10 @@ const Journal = () => {
                 onClick={() => handleSelectTrip(trip)}
                 className="bg-card rounded-2xl overflow-hidden shadow-soft cursor-pointer active:scale-[0.98] transition-transform border border-border/50"
               >
-                {firstPhoto ? (
+                {previewPhoto ? (
                   <div className="relative h-36">
                     <img
-                      src={firstPhoto.objectUrl}
+                      src={previewPhoto}
                       alt={trip.destination}
                       className="w-full h-full object-cover"
                     />

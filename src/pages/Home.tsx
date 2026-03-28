@@ -56,7 +56,7 @@ export default function Home() {
   const recentTrips = trips.slice(0, 3);
   const totalDistance = trips.reduce((sum, t) => sum + (t.distance_km || 0), 0);
   const totalPhotos = trips.reduce(
-    (sum, t) => sum + t.checkpoints.reduce((s, cp) => s + cp.photos.length, 0),
+    (sum, t) => sum + (t.checkpoints || []).reduce((s, cp) => s + (cp.photos?.length || 0), 0),
     0
   );
 
@@ -144,7 +144,7 @@ export default function Home() {
                 icon={<Navigation className="w-4 h-4" />}
                 label="Total Photos"
                 value={`${totalPhotos}`}
-                trend={`${trips.reduce((s, t) => s + t.checkpoints.length, 0)} stops`}
+                trend={`${trips.reduce((s, t) => s + (t.checkpoints?.length || 0), 0)} stops`}
                 trendUp
               />
             </div>

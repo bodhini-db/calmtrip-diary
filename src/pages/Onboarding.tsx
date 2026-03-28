@@ -108,13 +108,8 @@ export default function Onboarding() {
           });
         }
 
-        // If Supabase requires email confirmation there is no session yet
-        if (!data.session) {
-          setConfirmEmail(true);
-          setAuthLoading(false);
-          return;
-        }
-        // Otherwise useAuth will pick up the session and navigate via useEffect
+        navigate('/confirm-pending');
+        return;
       } else {
         const { error } = await signIn(email, password);
         if (error) throw error;

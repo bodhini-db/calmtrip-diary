@@ -11,6 +11,8 @@
 ✅ **trips** - Trip records with route and metadata  
 ✅ **photos** - Photo metadata with geolocation data  
 ✅ **privacy_settings** - User privacy preferences  
+✅ **profiles** - Public traveler profile metadata for discover  
+✅ **follows** - User follow relationships for the community feed  
 
 ### Storage Configuration
 ✅ **Bucket**: `photos`  
@@ -104,6 +106,43 @@ SELECT user_id, gps_tracking_enabled, allow_anonymous_sharing FROM privacy_setti
 
 -- Check storage files
 SELECT name FROM storage.objects WHERE bucket_id = 'photos' LIMIT 10;
+```
+
+### Required community tables
+These tables are required for Discover and Feed to work:
+
+```sql
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  username TEXT UNIQUE NOT NULL,
+  full_name TEXT,
+  avatar_url TEXT,
+  bio TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE follows (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  follower_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  following_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+In addition, the community feed requires a Supabase RLS policy on `trips` that allows reading trips from people you follow:
+
+```sql
+CREATE POLICY "Users can read followed trips"
+  ON trips FOR SELECT
+  USING (
+    auth.uid() = user_id
+    OR EXISTS (
+      SELECT 1
+      FROM follows
+      WHERE follower_id = auth.uid()
+        AND following_id = trips.user_id
+    )
+  );
 ```
 
 ### Check RLS Policies

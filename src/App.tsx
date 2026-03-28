@@ -6,8 +6,13 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useAuth } from "@/hooks/useAuth";
 import Onboarding from "./pages/Onboarding";
+import ConfirmPending from "./pages/ConfirmPending";
+import AuthConfirm from "./pages/AuthConfirm";
+import Feed from "./pages/Feed";
+import Discover from "./pages/Discover";
 import Home from "./pages/Home";
 import Journal from "./pages/Journal";
+import Profile from "./pages/Profile";
 import Stats from "./pages/Stats";
 import Settings from "./pages/Settings";
 import MapView from "./pages/MapView";
@@ -45,12 +50,19 @@ const App = () => (
         <Routes>
           {/* Onboarding / auth */}
           <Route path="/" element={<Onboarding />} />
+          <Route path="/confirm-pending" element={<ConfirmPending />} />
+          <Route path="/auth/confirm" element={<AuthConfirm />} />
 
           {/* Protected routes with bottom nav */}
           <Route element={<ProtectedLayout />}>
             <Route element={<AppLayout />}>
               <Route path="/home" element={<Home />} />
+              <Route path="/feed" element={<Feed />} />
+              <Route path="/discover" element={<Discover />} />
               <Route path="/journal" element={<Journal />} />
+              <Route path="/journal/:userId" element={<Journal />} />
+              <Route path="/journal/:userId/:tripId" element={<Journal />} />
+              <Route path="/profile/:userId" element={<Profile />} />
               <Route path="/stats" element={<Stats />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
