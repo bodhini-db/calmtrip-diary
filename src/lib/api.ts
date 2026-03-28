@@ -251,7 +251,9 @@ export const uploadProfileAvatar = async (userId: string, file: File) => {
     .from('profiles')
     .update({ avatar_url: publicUrl })
     .eq('id', userId);
-  if (updateError) throw updateError;
+  if (updateError) {
+    console.warn('profiles.avatar_url update failed (avatar still uploaded):', updateError.message);
+  }
 
   return publicUrl;
 };
