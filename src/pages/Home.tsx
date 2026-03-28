@@ -6,6 +6,7 @@ import { FloatingCard } from "@/components/ui/floating-card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useUserProfile } from "@/hooks/useUserProfile";
 import { getTrips, getTripPhotosList, getPhotoPublicUrl, getProfileFromUser } from "@/lib/api";
 import { Trip } from "@/lib/supabase";
 import { formatDistance } from "@/lib/insights";
@@ -17,12 +18,14 @@ import mapPreview from "@/assets/map-preview.jpg";
 export default function Home() {
   const navigate = useNavigate();
   const { user, loading } = useAuth();
+  const { data: profileRow } = useUserProfile(user?.id);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
 
   const profile = user ? getProfileFromUser(user) : null;
-  const displayName = profile?.full_name || user?.email?.split("@")[0] || "Traveler";
-  const avatarUrl = profile?.avatar_url;
+  const displayName =
+    profileRow?.full_name || profile?.full_name || user?.email?.split("@")[0] || "Traveler";
+  const avatarUrl = profileRow?.avatar_url ?? profile?.avatar_url;
 
   useEffect(() => {
     if (!user && !loading) {

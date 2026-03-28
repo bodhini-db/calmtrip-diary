@@ -15,6 +15,7 @@ export interface FeedCardEntry {
   location?: string | null;
   distance_km?: number | null;
   duration_minutes?: number | null;
+  cover_image_url?: string | null;
   profiles?: Array<{
     username: string;
     avatar_url?: string | null;
@@ -107,6 +108,19 @@ export function FeedCard({ entry }: FeedCardProps) {
             <span className="text-[11px] uppercase tracking-[0.25em] text-muted-foreground">Journal</span>
           </div>
         </CardHeader>
+
+        {entry.cover_image_url && (
+          <div className="px-4 -mt-1 pb-3">
+            <div className="relative w-full overflow-hidden rounded-2xl bg-muted aspect-[16/10]">
+              <img
+                src={entry.cover_image_url}
+                alt=""
+                className="h-full w-full object-cover"
+                loading="lazy"
+              />
+            </div>
+          </div>
+        )}
 
         <CardContent className="space-y-4 p-4 pt-0">
           <CardTitle className="text-lg">{entry.title || 'Untitled journey'}</CardTitle>

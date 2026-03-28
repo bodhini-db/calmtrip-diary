@@ -8,6 +8,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Camera } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { updateProfile, uploadAvatar, getProfileFromUser } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -24,6 +25,7 @@ export function ProfileDialog({
   user,
   onProfileUpdated,
 }: ProfileDialogProps) {
+  const queryClient = useQueryClient();
   const profile = getProfileFromUser(user);
   const [username, setUsername] = useState(profile.full_name || user.email?.split("@")[0] || "Traveler");
   const [avatarUrl, setAvatarUrl] = useState(profile.avatar_url || "");
@@ -55,10 +57,15 @@ export function ProfileDialog({
     try {
       const url = await uploadAvatar(user.id, file);
       setAvatarUrl(url);
+      await queryClient.invalidateQueries({ queryKey: ["profile", user.id] });
       toast.success("Photo uploaded");
     } catch (error) {
       console.error("Avatar upload failed:", error);
-      toast.error("Failed to upload photo.");
+      const msg =
+        error && typeof error === "object" && "message" in error
+          ? String((error as { message?: string }).message)
+          : "Failed to upload photo.";
+      toast.error(msg);
     } finally {
       setUploading(false);
       e.target.value = "";
@@ -72,6 +79,7 @@ export function ProfileDialog({
         full_name: username.trim() || undefined,
         avatar_url: avatarUrl || undefined,
       });
+      await queryClient.invalidateQueries({ queryKey: ["profile", user.id] });
       onProfileUpdated();
       onOpenChange(false);
       toast.success("Profile updated");

@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { UserProfile } from '@/hooks/useUsers';
 
 export const useUserProfile = (userId?: string) => {
-  return useQuery<UserProfile, Error>({
+  return useQuery<UserProfile | null, Error>({
     queryKey: ['profile', userId],
     queryFn: async () => {
       if (!userId) throw new Error('Missing profile id');
@@ -13,8 +13,7 @@ export const useUserProfile = (userId?: string) => {
         .eq('id', userId)
         .maybeSingle();
       if (error) throw error;
-      if (!data) throw new Error('Profile not found');
-      return data as UserProfile;
+      return (data as UserProfile) ?? null;
     },
     enabled: !!userId,
     initialData: undefined,

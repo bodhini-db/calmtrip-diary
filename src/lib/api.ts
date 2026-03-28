@@ -20,18 +20,36 @@ export const updateProfile = async (updates: { full_name?: string; avatar_url?: 
   return data.user;
 };
 
+/**
+ * Upload profile avatar to Storage under `{userId}/...` so Supabase Storage RLS
+ * policies that require the first path segment to equal `auth.uid()` work on every host (incl. Vercel).
+ * Also updates `profiles.avatar_url` so the feed and other screens stay in sync with auth metadata.
+ */
 export const uploadAvatar = async (userId: string, file: File): Promise<string> => {
   const ext = file.name.split('.').pop() || 'jpg';
   const path = `${userId}/avatar.${ext}`;
+  const contentType = file.type?.trim() || 'image/jpeg';
 
-  const { error: uploadError } = await supabase.storage
-    .from('photos')
-    .upload(path, file, { contentType: file.type, upsert: true });
+  const { error: uploadError } = await supabase.storage.from('photos').upload(path, file, {
+    contentType,
+    upsert: true,
+    cacheControl: '3600',
+  });
 
   if (uploadError) throw uploadError;
 
-  const { data } = supabase.storage.from('photos').getPublicUrl(path);
-  return data.publicUrl;
+  const publicUrl = getPhotoPublicUrl(path);
+
+  const { error: profileError } = await supabase
+    .from('profiles')
+    .update({ avatar_url: publicUrl })
+    .eq('id', userId);
+
+  if (profileError) {
+    console.warn('profiles.avatar_url update failed (avatar still in storage):', profileError.message);
+  }
+
+  return publicUrl;
 };
 
 // ── Trip API ──────────────────────────────────────────────────
@@ -219,11 +237,13 @@ export const uploadPhoto = async (
 
 export const uploadProfileAvatar = async (userId: string, file: File) => {
   const ext = file.name.split('.').pop() || 'jpg';
-  const fileName = `avatars/${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  /** First folder must be `userId` for Storage policies that match auth.uid() to folder[0]. */
+  const fileName = `${userId}/profile/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const contentType = file.type?.trim() || 'image/jpeg';
 
   const { error: uploadError } = await supabase.storage
     .from('photos')
-    .upload(fileName, file, { contentType: file.type });
+    .upload(fileName, file, { contentType, upsert: true, cacheControl: '3600' });
   if (uploadError) throw uploadError;
 
   const publicUrl = getPhotoPublicUrl(fileName);
@@ -254,6 +274,37 @@ export const updatePhotoCaption = async (photoId: string, caption: string, emoji
 export const getPhotoPublicUrl = (storagePath: string): string => {
   const { data } = supabase.storage.from('photos').getPublicUrl(storagePath);
   return data.publicUrl;
+};
+
+/**
+ * For each trip ID, returns the public URL of the earliest photo (by `taken_at`) from the `photos` table.
+ * Used by the feed; requires RLS to allow SELECT on followed users' trip photos (see supabase SQL snippet).
+ */
+export const getFirstPhotoPublicUrlByTripIds = async (
+  tripIds: string[]
+): Promise<Map<string, string>> => {
+  const map = new Map<string, string>();
+  if (tripIds.length === 0) return map;
+
+  const { data, error } = await supabase
+    .from('photos')
+    .select('trip_id, storage_path, taken_at')
+    .in('trip_id', tripIds);
+
+  if (error) throw error;
+
+  const rows = [...(data || [])].sort((a, b) => {
+    const ta = new Date((a as { taken_at?: string }).taken_at || 0).getTime();
+    const tb = new Date((b as { taken_at?: string }).taken_at || 0).getTime();
+    return ta - tb;
+  });
+
+  for (const row of rows as { trip_id: string; storage_path: string }[]) {
+    if (!map.has(row.trip_id)) {
+      map.set(row.trip_id, getPhotoPublicUrl(row.storage_path));
+    }
+  }
+  return map;
 };
 
 /** @deprecated use getPhotoPublicUrl */

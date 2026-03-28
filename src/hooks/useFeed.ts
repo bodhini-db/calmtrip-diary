@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { getFirstPhotoPublicUrlByTripIds } from '@/lib/api';
 
 export interface FeedEntry {
   id: string;
@@ -11,6 +12,8 @@ export interface FeedEntry {
   location?: string | null;
   distance_km?: number | null;
   duration_minutes?: number | null;
+  /** First trip photo from `photos` table (earliest `taken_at`), for feed hero image */
+  cover_image_url?: string | null;
   profiles?: Array<{
     username: string;
     avatar_url?: string | null;
@@ -69,7 +72,17 @@ export const useFeed = () => {
 
       if (tripsError) throw tripsError;
 
-      const mapped = (trips || []).map((trip: any) => {
+      const tripList = trips || [];
+      const tripIds = tripList.map((t: { id: string }) => t.id);
+
+      let photoByTrip = new Map<string, string>();
+      try {
+        photoByTrip = await getFirstPhotoPublicUrlByTripIds(tripIds);
+      } catch (e) {
+        console.warn('Feed: could not load photos for trips (check RLS policy for followers):', e);
+      }
+
+      const mapped = tripList.map((trip: any) => {
         const profile = profileMap.get(trip.user_id);
         return {
           id: trip.id,
@@ -80,6 +93,7 @@ export const useFeed = () => {
           created_at: trip.created_at,
           distance_km: trip.distance_km ?? null,
           duration_minutes: trip.duration_minutes ?? null,
+          cover_image_url: photoByTrip.get(trip.id) ?? null,
           profiles: profile ? [{ username: profile.username, avatar_url: profile.avatar_url }] : null,
         };
       });
